@@ -17,7 +17,8 @@ def synth_session(side, seed=0, motion_artifacts=True):
     """Fake a recording that follows the real protocol. Fist = strong EMG on channels 2-5."""
     rng = np.random.default_rng(seed)
     emg, lab, seg = [], [], []
-    for i, (_, label, dur) in enumerate(protocol(side)):
+    steps = [st for _, _, block in protocol(side) for st in block]
+    for i, (label, dur, _) in enumerate(steps):
         n = int(dur * C.EMG_HZ)
         gain = np.full(C.N_CHANNELS, 3.0)
         if label == FIST:

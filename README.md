@@ -31,6 +31,8 @@ Close Myo Connect and any other script using the bands first: a band only accept
 
 ```bash
 python -m myomouse.identify            # each band vibrates, you say which arm -> bands.json
+python -m myomouse.run --check --dry-run  # no model needed: EMG rate (~200 Hz) + muscle activity bars
+python -m myomouse.run --check            # same, and the right band moves the cursor (tune gain/invert)
 python -m myomouse.record --side right # ~2 min, follow the cues
 python -m myomouse.record --side left
 python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z false clicks"

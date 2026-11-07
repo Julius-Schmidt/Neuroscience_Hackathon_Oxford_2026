@@ -4,6 +4,7 @@
     python -m myomouse.run --mode threshold # fallback: simple activation threshold
     python -m myomouse.run --dry-run        # print events instead of moving the mouse
     python -m myomouse.run --fake --dry-run # no hardware needed
+    python -m myomouse.run --check          # before training: EMG rate, muscle activity, cursor only
 
 Band R --> gyro/orientation -> cursor;  EMG -> fist -> left button (hold = drag)
 Band L --> EMG -> fist -> right button
@@ -18,24 +19,37 @@ import time
 from . import config as C
 
 
-def band_worker(side, mode, pointer, fake, q, show):
+def band_worker(side, mode, pointer, fake, q, show, check):
     """Runs in its own process: reads one band, sends ('move'|'btn'|'p', ...) to the queue."""
+    from collections import deque
+
+    import numpy as np
+
     from .detector import FistDetector, load_model
     from .device import open_band
+    from .features import envelope
     from .pointer import Pointer
 
-    det = FistDetector(load_model(side), mode)
+    det = None if check else FistDetector(load_model(side), mode)
+    recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
     band = open_band(side, fake=fake, seed=1 if side == "right" else 2)
     ptr = Pointer() if pointer else None
     last_show = [0.0]
 
     def on_emg(sample):
-        ev = det.push(sample)
-        if ev:
-            q.put(("btn", side, ev, time.perf_counter()))
+        if det is not None:
+            ev = det.push(sample)
+            if ev:
+                q.put(("btn", side, ev, time.perf_counter()))
+        else:
+            recent.append(sample)
         if show and time.perf_counter() - last_show[0] > 0.1:
             last_show[0] = time.perf_counter()
-            q.put(("p", side, det.last_p, 0.0))
+            if det is not None:
+                value = det.last_p
+            else:  # raw muscle activity, scaled so a hard fist is close to 1
+                value = min(1.0, envelope(np.array(recent)) / 4.0) if len(recent) > 1 else 0.0
+            q.put(("p", side, value, 0.0))
 
     def on_imu(quat):
         dx, dy = ptr.update(quat)
@@ -103,14 +117,28 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="don't touch the real mouse")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--show", action="store_true", help="print live fist probabilities")
+    ap.add_argument("--check", action="store_true",
+                    help="no classifier: show EMG rate + muscle activity and move the cursor (use before training)")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
     args = ap.parse_args()
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
+    if args.check:
+        args.show = True
+    if not args.fake and not C.BANDS_FILE.exists():
+        raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
+    if not args.check:
+        from .detector import model_path
+        missing = [s for s in sides if not model_path(s).exists()]
+        if missing:
+            raise SystemExit(
+                f"No trained model for: {', '.join(missing)}.\n"
+                "  Train first:  python -m myomouse.record --side <side>  then  python -m myomouse.train --side <side>\n"
+                "  Or test the bands without a model:  python -m myomouse.run --check --dry-run")
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(s, args.mode, s == C.POINTER_SIDE, args.fake, q, args.show))
+                         args=(s, args.mode, s == C.POINTER_SIDE, args.fake, q, args.show, args.check))
              for s in sides]
     for p in procs:
         p.start()
@@ -120,7 +148,8 @@ def main():
     probs = {s: 0.0 for s in sides}
     lat = []
     t_start = time.perf_counter()
-    print(f"mode={args.mode} sides={sides} pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
+    label = "check (no classifier, bars = muscle activity)" if args.check else args.mode
+    print(f"mode={label} sides={sides} pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
     try:
         while True:
             if args.seconds and time.perf_counter() - t_start > args.seconds:

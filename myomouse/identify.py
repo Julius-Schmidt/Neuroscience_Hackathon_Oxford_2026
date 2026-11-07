@@ -8,6 +8,7 @@ Make sure no other program (Myo Connect, myo_controller.py) is connected to the 
 
 import asyncio
 import json
+import sys
 
 from . import config as C
 from .device import COMMAND_UUID, CMD_NEVER_SLEEP, cmd_vibrate, discover_myos
@@ -28,6 +29,19 @@ async def buzz(address):
     return True
 
 
+def ask(prompt):
+    """Ask l/r/s. Ignores keys typed while the band was still buzzing; accepts 'left' etc."""
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+    while True:
+        ans = input(prompt).strip().lower()[:1]
+        if ans in ("l", "r", "s"):
+            return ans
+
+
 def main():
     print("scanning for Myos over Bluetooth for 6 s... (tap a band's logo to wake it)")
     found = asyncio.run(discover_myos(6.0))
@@ -42,9 +56,7 @@ def main():
         print(f"\nbuzzing {name} ({addr}) ...")
         if not asyncio.run(buzz(addr)):
             continue
-        ans = ""
-        while ans not in ("l", "r", "s"):
-            ans = input("which arm vibrated? [l]eft / [r]ight / [s]kip: ").strip().lower()
+        ans = ask(f"which arm vibrated ({name})? [l]eft / [r]ight / [s]kip: ")
         if ans != "s":
             bands["left" if ans == "l" else "right"] = addr
 
