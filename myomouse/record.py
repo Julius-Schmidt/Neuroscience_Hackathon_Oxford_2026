@@ -1,7 +1,9 @@
 """Record calibration data for one arm (about 2 minutes of recording).
 
-    python -m myomouse.record --side right
-    python -m myomouse.record --side left
+    python -m myomouse.record --user julius --side right
+    python -m myomouse.record --user julius --side left
+
+Saved to data/<user>/<side>_<timestamp>.npz.
 
 The recording is split into short blocks. Before each block you read what to do and
 press Enter; then a 3-2-1 countdown starts it. During a block a live line shows what to
@@ -23,6 +25,7 @@ import time
 import numpy as np
 
 from . import config as C
+from .users import add_user_arg, data_dir
 from .device import open_band
 
 REST, FIST, IGNORE = 0, 1, -1
@@ -132,6 +135,7 @@ def countdown(cam=None, ui=None):
 
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap)
     ap.add_argument("--side", choices=["left", "right"], required=True)
     ap.add_argument("--fake", action="store_true", help="simulated band, for testing")
     ap.add_argument("--no-wait", action="store_true", help="don't wait for Enter between blocks")
@@ -238,16 +242,17 @@ def main():
                 pass
         cam.stop()
 
-    C.DATA_DIR.mkdir(exist_ok=True)
-    out = C.DATA_DIR / f"{args.side}_{time.strftime('%Y%m%d-%H%M%S')}.npz"
+    out_dir = data_dir(args.user)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{args.side}_{time.strftime('%Y%m%d-%H%M%S')}.npz"
     # label = what train uses (camera-refined if available), label_cue = the plain cue timing
     np.savez(out, emg=np.asarray(emg, dtype=np.int8), label=final, label_cue=cue,
-             seg=np.asarray(segs), t=np.asarray(times), side=args.side, fs=C.EMG_HZ, **extra)
+             seg=np.asarray(segs), t=np.asarray(times), side=args.side, user=args.user, fs=C.EMG_HZ, **extra)
     n = len(emg)
     print(f"\nsaved {out}: {n} samples ({n / C.EMG_HZ:.1f} s, expected ~{total:.0f} s)")
     if n < 0.8 * C.EMG_HZ * total:
         print("WARNING: fewer samples than expected - Bluetooth may be dropping packets.")
-    print(f"next: python -m myomouse.train --side {args.side}")
+    print(f"next: python -m myomouse.train --user {args.user} --side {args.side}")
 
 
 if __name__ == "__main__":

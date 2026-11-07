@@ -2,7 +2,7 @@
 
     python -m devtool --user dylan                  # both bands (needs bands.json from myomouse.identify)
     python -m devtool --user dylan --sides right    # one band
-    python -m devtool --fake                        # no hardware: hold L / R to squeeze
+    python -m devtool --user test --fake            # no hardware: hold L / R to squeeze
 
 Modes:   1 live view    2 calibrate    3 click-target test
 Keys:    Up/Down threshold    Left/Right refractory    [ ] cursor smoothing
@@ -46,7 +46,7 @@ TRACE_S = 2.0
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--user", default="default", help="calibration + session files are saved per user")
+    ap.add_argument("--user", required=True, help="calibration + session files are saved per user, e.g. --user julius")
     ap.add_argument("--sides", default="right,left")
     ap.add_argument("--fake", action="store_true", help="simulated bands; hold L / R keys to squeeze")
     ap.add_argument("--fake-drop", type=float, default=0.0, help="fake packet loss rate, e.g. 0.01")

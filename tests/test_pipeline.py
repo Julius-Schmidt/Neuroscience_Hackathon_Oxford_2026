@@ -36,11 +36,14 @@ def synth_session(side, seed=0, motion_artifacts=True):
     return {"emg": np.concatenate(emg), "label": np.concatenate(lab), "seg": np.concatenate(seg)}
 
 
+USER = "tester"
+
+
 @pytest.fixture
 def tmp_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(C, "MODEL_DIR", tmp_path / "models")
-    C.DATA_DIR.mkdir()
+    (C.DATA_DIR / USER).mkdir(parents=True)
     return tmp_path
 
 
@@ -64,10 +67,10 @@ def test_debouncer_needs_n_in_a_row_and_hysteresis():
 def test_train_and_replay(tmp_dirs, side, monkeypatch):
     for sid in range(2):
         s = synth_session(side, seed=sid)
-        np.savez(C.DATA_DIR / f"{side}_s{sid}.npz", **s, side=side, fs=C.EMG_HZ)
-    monkeypatch.setattr("sys.argv", ["train", "--side", side])
+        np.savez(C.DATA_DIR / USER / f"{side}_s{sid}.npz", **s, side=side, fs=C.EMG_HZ)
+    monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", side])
     train.main()
-    model = load_model(side)
+    model = load_model(USER, side)
 
     test = synth_session(side, seed=99)
     n_fists = len({g for g, l in zip(test["seg"], test["label"]) if l == FIST})
@@ -194,12 +197,12 @@ def test_train_with_camera_labels(tmp_dirs, monkeypatch):
         s = synth_session("right", seed=sid)
         t, cam_t, ratio = fake_camera(s, delay=0.0, late=0.0, stray=(0, 0))
         lab, _ = vision_labels(t, s["label"], s["seg"], cam_t, ratio, lag=0.0)
-        np.savez(C.DATA_DIR / f"right_s{sid}.npz", emg=s["emg"], label=lab, label_cue=s["label"],
+        np.savez(C.DATA_DIR / USER / f"right_s{sid}.npz", emg=s["emg"], label=lab, label_cue=s["label"],
                  seg=s["seg"], t=t, cam_t=cam_t, cam_ratio=ratio, side="right", fs=C.EMG_HZ)
     for labels in ("camera", "cue"):
-        monkeypatch.setattr("sys.argv", ["train", "--side", "right", "--labels", labels])
+        monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", "right", "--labels", labels])
         train.main()
-        assert load_model("right")["pipeline"] is not None
+        assert load_model(USER, "right")["pipeline"] is not None
 
 
 def test_playground_left_recolours_right_drags():

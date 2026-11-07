@@ -8,16 +8,17 @@ import numpy as np
 
 from . import config as C
 from .features import envelope, window_features
+from .users import model_dir
 
 
-def model_path(side: str) -> Path:
-    return C.MODEL_DIR / f"fist_{side}.joblib"
+def model_path(user: str, side: str) -> Path:
+    return model_dir(user) / f"fist_{side}.joblib"
 
 
-def load_model(side: str) -> dict:
-    p = model_path(side)
+def load_model(user: str, side: str) -> dict:
+    p = model_path(user, side)
     if not p.exists():
-        raise FileNotFoundError(f"No model for {side} arm at {p}. Run record + train first.")
+        raise FileNotFoundError(f"No model for {user}'s {side} arm at {p}. Run record + train first.")
     return joblib.load(p)
 
 

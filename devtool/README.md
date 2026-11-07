@@ -6,7 +6,7 @@ Separate from `myomouse/` and never moves the real mouse. It only borrows the BL
 ```bash
 python -m myomouse.identify            # once, if bands.json doesn't exist yet
 python -m devtool --user dylan         # both bands
-python -m devtool --fake               # no hardware: hold L / R to squeeze
+python -m devtool --user test --fake   # no hardware: hold L / R to squeeze
 ```
 
 Close `myomouse.run` / `arena` first: a band only accepts one connection.

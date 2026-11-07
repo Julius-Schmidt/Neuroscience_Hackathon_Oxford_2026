@@ -4,10 +4,10 @@ The arena draws its own cursor, so the real mouse is never touched: no Accessibi
 permission needed and no stray clicks on your desktop. It uses the same band processes
 as `myomouse.run`, so what works here works in the live demo.
 
-    python -m myomouse.arena                 # both bands, trained classifiers
-    python -m myomouse.arena --sides right   # pointer band only (left-click targets only)
-    python -m myomouse.arena --check         # no models yet: cursor only, Space/Enter click
-    python -m myomouse.arena --fake          # no hardware
+    python -m myomouse.arena --user julius                # both bands, julius's classifiers
+    python -m myomouse.arena --user julius --sides right  # pointer band only (left-click targets only)
+    python -m myomouse.arena --check                      # no models yet: cursor only, Space/Enter click
+    python -m myomouse.arena --user julius --fake         # no hardware
 
 Targets:  blue = left click (right fist),  orange = right click (left fist).
 Keys:  +/- gain   X/Y flip direction   C re-centre   R reset score   F fullscreen   Esc quit
@@ -22,6 +22,7 @@ from collections import deque
 
 from . import config as C
 from .run import start_bands
+from .users import add_user_arg, require_user
 
 BG = (18, 20, 26)
 FG = (225, 228, 235)
@@ -94,17 +95,20 @@ class Arena:
 
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap, required=False)
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
     ap.add_argument("--sides", default="right,left")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--check", action="store_true", help="no classifier: cursor only, click with Space/Enter")
     ap.add_argument("--size", default="1280x800")
     args = ap.parse_args()
+    if not args.check:
+        require_user(ap, args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if C.POINTER_SIDE not in sides:
         print(f"note: the pointer band ({C.POINTER_SIDE}) isn't running, so the cursor won't move")
-    q, procs = start_bands(sides, args.mode, args.fake, True, args.check)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check)
     status = {s: "connecting..." for s in sides}
     probs = {s: 0.0 for s in sides}
 

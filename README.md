@@ -34,16 +34,20 @@ Close Myo Connect and any other script using the bands first: a band only accept
 python -m myomouse.identify            # each band vibrates, you say which arm -> bands.json
 python -m myomouse.run --check --dry-run  # no model needed: EMG rate (~200 Hz) + muscle activity bars
 python -m myomouse.run --check            # same, and the right band moves the cursor (tune gain/invert)
-python -m myomouse.record --side right # ~2 min, follow the cues (webcam watches your hand)
-python -m myomouse.record --side left
-python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z false clicks"
-python -m myomouse.train  --side left
-python -m myomouse.run --dry-run --show   # watch live fist probabilities, no mouse control
-python -m myomouse.arena                  # practice: move a cursor + hit targets (real mouse untouched)
-python -m myomouse.run                    # the live demo + playground window (Esc / Ctrl+C to stop)
+python -m myomouse.record --user julius --side right # ~2 min, follow the cues (webcam watches your hand)
+python -m myomouse.record --user julius --side left
+python -m myomouse.train  --user julius --side right # prints accuracy + "caught X/Y fists, Z false clicks"
+python -m myomouse.train  --user julius --side left
+python -m myomouse.run --user julius --dry-run --show   # watch live fist probabilities, no mouse control
+python -m myomouse.arena --user julius    # practice: move a cursor + hit targets (real mouse untouched)
+python -m myomouse.run --user julius      # the live demo + playground window (Esc / Ctrl+C to stop)
 python -m myomouse.off                    # let the bands sleep again (--deep powers them off)
 ```
 
+- **Users:** every recording and model belongs to one user, so `record`, `train`, `run`,
+  `arena` and `devtool` need `--user <name>` (only `--check` works without it).
+  Recordings go to `data/<user>/`, models to `models/<user>/fist_<side>.joblib`, and `train`
+  only uses that user's recordings. A new person records + trains under their own name.
 - **Camera labels:** while you record, the webcam (MediaPipe hand tracking) checks when your
   hand *actually* closed and opened, and the fist labels follow that instead of the cue timing
   (your reaction time, holding too long, a fist while you should relax). Put the laptop so it
@@ -61,14 +65,14 @@ python -m myomouse.off                    # let the bands sleep again (--deep po
   `--no-window` = terminal only; `--dry-run` = window draws its own cursor, real mouse untouched.
 - **Different demo user:** re-record and re-train both arms. Recording more sessions for the
   same person adds to the training data, because `train` uses every `data/<side>_*.npz`.
-- **If the classifier misbehaves:** `python -m myomouse.run --mode threshold` uses a simple
+- **If the classifier misbehaves:** `python -m myomouse.run --user julius --mode threshold` uses a simple
   calibrated activation threshold instead.
-- **One band only:** `python -m myomouse.run --sides right`.
-- **Practice / tuning the cursor:** `python -m myomouse.arena` opens a window with its own cursor
+- **One band only:** `python -m myomouse.run --user julius --sides right`.
+- **Practice / tuning the cursor:** `python -m myomouse.arena --user julius` opens a window with its own cursor
   and targets (blue = right fist, orange = left fist). `+`/`-` change the gain and `X`/`Y` flip
   directions live; on exit it prints the values to paste into `config.py`. Before training,
   use `--check` (cursor only, Space/Enter click).
-- **No hardware:** `python -m myomouse.run --fake --dry-run` (needs trained models).
+- **No hardware:** `python -m myomouse.run --user julius --fake --dry-run` (needs trained models).
 
 ## How it stays fast
 

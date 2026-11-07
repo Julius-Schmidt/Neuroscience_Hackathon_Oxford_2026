@@ -1,9 +1,9 @@
-"""Train the fist classifier for one arm from every recording in data/.
+"""Train one user's fist classifier for one arm from every recording in data/<user>/.
 
-    python -m myomouse.train --side right
-    python -m myomouse.train --side left
+    python -m myomouse.train --user julius --side right
+    python -m myomouse.train --user julius --side left
 
-Saves models/fist_<side>.joblib with both an LDA model and a threshold fallback,
+Saves models/<user>/fist_<side>.joblib with both an LDA model and a threshold fallback,
 and prints how many clicks it would have caught / falsely fired on the recording.
 
 Recordings made with the camera carry camera-timed labels, which are used by default.
@@ -22,14 +22,17 @@ from sklearn.preprocessing import StandardScaler
 
 from . import config as C
 from .detector import FistDetector, model_path
+from .users import add_user_arg, data_dir
 from .features import envelope, sliding_features
 from .record import FIST, IGNORE
 
 
-def load_sessions(side, labels="camera"):
-    files = sorted(C.DATA_DIR.glob(f"{side}_*.npz"))
+def load_sessions(user, side, labels="camera"):
+    folder = data_dir(user)
+    files = sorted(folder.glob(f"{side}_*.npz"))
     if not files:
-        raise SystemExit(f"No recordings for {side} in {C.DATA_DIR}. Run myomouse.record first.")
+        raise SystemExit(f"No recordings for {user}'s {side} arm in {folder}.\n"
+                         f"  Record first:  python -m myomouse.record --user {user} --side {side}")
     out = []
     for f in files:
         s = dict(np.load(f)) | {"file": f.name}
@@ -81,12 +84,13 @@ def event_report(model, mode, sess):
 
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap)
     ap.add_argument("--side", choices=["left", "right"], required=True)
     ap.add_argument("--labels", choices=["camera", "cue"], default="camera",
                     help="camera-timed labels (default, where recorded) or plain cue timing")
     args = ap.parse_args()
 
-    sessions = load_sessions(args.side, args.labels)
+    sessions = load_sessions(args.user, args.side, args.labels)
     parts = []
     for sid, s in enumerate(sessions):
         s["sid"] = sid
@@ -110,10 +114,12 @@ def main():
         print("WARNING: fist isn't stronger than rest in this data - check the band is on and tight.")
     threshold = {"center": float((rest_med + fist_med) / 2), "scale": float(max(fist_med - rest_med, 1e-3) / 6)}
 
-    model = {"pipeline": pipe, "threshold": threshold, "window": C.WINDOW, "step": C.STEP, "side": args.side}
-    C.MODEL_DIR.mkdir(exist_ok=True)
-    joblib.dump(model, model_path(args.side))
-    print(f"\nsaved {model_path(args.side)}")
+    model = {"pipeline": pipe, "threshold": threshold, "window": C.WINDOW, "step": C.STEP, "side": args.side,
+             "user": args.user, "trained_on": [s["file"] for s in sessions]}
+    out = model_path(args.user, args.side)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, out)
+    print(f"\nsaved {out}")
 
     print("\nreplay of the recordings (on training data, so slightly optimistic):")
     for s in sessions:

@@ -1,11 +1,11 @@
 """Live demo: one process per band, a mouse controller in the main process.
 
-    python -m myomouse.run                  # both bands, LDA classifiers, playground window
-    python -m myomouse.run --no-window      # same, terminal only
-    python -m myomouse.run --mode threshold # fallback: simple activation threshold
-    python -m myomouse.run --dry-run        # print events instead of moving the mouse
-    python -m myomouse.run --fake --dry-run # no hardware needed
-    python -m myomouse.run --check          # before training: EMG rate, muscle activity, cursor only
+    python -m myomouse.run --user julius                  # both bands, julius's models, playground window
+    python -m myomouse.run --user julius --no-window      # same, terminal only
+    python -m myomouse.run --user julius --mode threshold # fallback: simple activation threshold
+    python -m myomouse.run --user julius --dry-run        # print events instead of moving the mouse
+    python -m myomouse.run --user julius --fake --dry-run # no hardware needed
+    python -m myomouse.run --check          # before training (no model, so no --user): EMG rate, activity, cursor
 
 Band R --> gyro/orientation -> cursor;  EMG -> fist -> left button (hold = drag)
 Band L --> EMG -> fist -> right button
@@ -22,9 +22,10 @@ import time
 from collections import deque
 
 from . import config as C
+from .users import add_user_arg, require_user
 
 
-def band_worker(side, mode, pointer, fake, q, show, check):
+def band_worker(user, side, mode, pointer, fake, q, show, check):
     """Runs in its own process: reads one band, sends ('move'|'btn'|'p', ...) to the queue."""
     from collections import deque
 
@@ -35,7 +36,7 @@ def band_worker(side, mode, pointer, fake, q, show, check):
     from .features import envelope
     from .pointer import Pointer
 
-    det = None if check else FistDetector(load_model(side), mode)
+    det = None if check else FistDetector(load_model(user, side), mode)
     recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
     band = open_band(side, fake=fake, seed=1 if side == "right" else 2)
     ptr = Pointer() if pointer else None
@@ -81,22 +82,25 @@ def band_worker(side, mode, pointer, fake, q, show, check):
         band.stop()
 
 
-def start_bands(sides, mode, fake, show, check):
-    """Check bands.json / models exist, then start one process per band. Returns (queue, procs)."""
+def start_bands(user, sides, mode, fake, show, check):
+    """Check bands.json / the user's models exist, then start one process per band. Returns (queue, procs)."""
     if not fake and not C.BANDS_FILE.exists():
         raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
     if not check:
         from .detector import model_path
-        missing = [s for s in sides if not model_path(s).exists()]
+        missing = [s for s in sides if not model_path(user, s).exists()]
         if missing:
+            from .users import known_users
+            others = ", ".join(known_users()) or "none yet"
             raise SystemExit(
-                f"No trained model for: {', '.join(missing)}.\n"
-                "  Train first:  python -m myomouse.record --side <side>  then  python -m myomouse.train --side <side>\n"
+                f"No trained model for {user}: {', '.join(missing)} (users with models: {others}).\n"
+                f"  Train first:  python -m myomouse.record --user {user} --side <side>"
+                f"  then  python -m myomouse.train --user {user} --side <side>\n"
                 "  Or test the bands without a model:  python -m myomouse.run --check --dry-run")
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(s, mode, s == C.POINTER_SIDE, fake, q, show, check))
+                         args=(user, s, mode, s == C.POINTER_SIDE, fake, q, show, check))
              for s in sides]
     for p in procs:
         p.start()
@@ -188,6 +192,7 @@ class Controller:
 
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap, required=False)
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
     ap.add_argument("--sides", default="right,left", help="e.g. 'right' to run one band only")
     ap.add_argument("--dry-run", action="store_true", help="don't touch the real mouse")
@@ -198,18 +203,20 @@ def main():
     ap.add_argument("--no-window", action="store_true", help="no playground window, terminal only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
     args = ap.parse_args()
+    if not args.check:
+        require_user(ap, args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if args.check:
         args.show = True
     window = not args.no_window
     # the window shows the probability bars, so the bands always send them then
-    q, procs = start_bands(sides, args.mode, args.fake, args.show or window, args.check)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, args.show or window, args.check)
 
     ctrl = Controller(Mouse(args.dry_run), sides, print_probs=args.show and not window)
     t_start = time.perf_counter()
     label = "check (no classifier, bars = muscle activity)" if args.check else args.mode
-    print(f"mode={label} sides={sides} pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
+    print(f"user={args.user or '-'} mode={label} sides={sides} pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
     stop = threading.Event()
 
     def consume():
