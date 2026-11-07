@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Controlled Text Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif; /* Using Inter font as a Tailwind default */
+        }
+        .text-viewer-content {
+            height: 300px; /* Fixed height for scrollability */
+            overflow-y: auto;
+            border: 1px solid #e5e7eb; /* gray-200 */
+            padding: 1rem;
+            border-radius: 0.5rem; /* rounded-lg */
+            line-height: 1.6;
+            transition: font-size 0.3s ease-in-out;
+        }
+        /* Custom scrollbar for better aesthetics (optional) */
+        .text-viewer-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .text-viewer-content::-webkit-scrollbar-track {
+            background: #f1f5f9; /* slate-100 */
+            border-radius: 0.5rem;
+        }
+        .text-viewer-content::-webkit-scrollbar-thumb {
+            background: #94a3b8; /* slate-400 */
+            border-radius: 0.5rem;
+        }
+        .text-viewer-content::-webkit-scrollbar-thumb:hover {
+            background: #64748b; /* slate-500 */
+        }
+        .settings-panel {
+            transition: transform 0.3s ease-in-out;
+        }
+        .settings-panel.open {
+            transform: translateX(0);
+        }
+        .settings-panel.closed {
+            transform: translateX(100%);
+        }
+        #loadingIndicator {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            z-index: 1000;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #22c55e; /* green-500 */
+            color: white;
+            padding: 10px 20px;
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1001;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+        .toast.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex flex-col items-center justify-center min-h-screen p-4 selection:bg-sky-300 selection:text-sky-900">
+
+    <div id="loadingIndicator">Loading Assets & Initializing Camera...</div>
+    <div id="toastNotification" class="toast"></div>
+
+    <div class="container mx-auto max-w-4xl w-full p-4 md:p-6 bg-white shadow-xl rounded-xl">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-sky-600">Gesture Controlled Text Viewer</h1>
+            <p class="text-slate-600 mt-2">Interact with the text using hand gestures. Open settings to customize controls.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="md:col-span-1 p-4 bg-slate-50 rounded-lg shadow">
+                <h2 class="text-xl font-semibold mb-3 text-sky-700">Gesture Input</h2>
+                <div class="relative w-full aspect-video bg-black rounded-md overflow-hidden">
+                    <video id="webcamFeed" class="absolute inset-0 w-full h-full object-cover transform scaleX-[-1]"></video>
+                    <canvas id="gestureCanvas" class="absolute inset-0 w-full h-full"></canvas>
+                </div>
+                <p id="detectedGesture" class="mt-3 text-center font-medium text-lg text-indigo-600 h-8">No gesture detected</p>
+                <p class="text-xs text-slate-500 mt-2 text-center">Ensure good lighting and your hand is clearly visible.</p>
+            </div>
+
+            <div class="md:col-span-2 p-4 bg-slate-50 rounded-lg shadow">
+                <h2 class="text-xl font-semibold mb-3 text-sky-700">Readable Content</h2>
+                <div id="textViewer" class="text-viewer-content bg-white">
+                    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+                    <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
+                    <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur?</p>
+                    <p>Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur? At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollit anim id est laborum et dolorum fuga.</p>
+                </div>
+                <div class="mt-4 flex justify-end space-x-2">
+                    <button id="resetSizeBtn" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-md shadow transition-colors">Reset Size</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="fixed top-4 right-4 z-50">
+            <button id="toggleSettingsBtn" class="p-3 bg-sky-600 hover:bg-sky-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-opacity-50">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.646.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 1.905c-.007.379.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.333.183-.582.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.759 6.759 0 010-1.905c.007-.379-.137-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            </button>
+        </div>
+
+        <div id="settingsPanel" class="settings-panel closed fixed top-0 right-0 h-full w-80 md:w-96 bg-white shadow-2xl p-6 z-40 overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-semibold text-sky-700">Settings</h2>
+                <button id="closeSettingsBtn" class="p-2 text-slate-500 hover:text-sky-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <h3 class="text-lg font-medium mb-2 text-slate-700">Gesture to Action Mapping</h3>
+            <p class="text-sm text-slate-500 mb-4">Assign an action to each recognized gesture.</p>
+
+            <div id="mappingsContainer" class="space-y-4">
+                </div>
+
+            <button id="saveSettingsBtn" class="mt-8 w-full px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md shadow transition-colors">Save Settings</button>
+            <button id="resetMappingsBtn" class="mt-3 w-full px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-md shadow transition-colors">Reset to Defaults</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const GESTURES = {
+            WAVE_LEFT: 'Wave Left',
+            WAVE_RIGHT: 'Wave Right',
+            HAND_UP: 'Hand Up',
+            HAND_DOWN: 'Hand Down',
+            NONE: 'None' // Represents no specific defined gesture
+        };
+
+        const ACTIONS = {
+            SCROLL_UP: 'Scroll Up',
+            SCROLL_DOWN: 'Scroll Down',
+            INCREASE_SIZE: 'Increase Text Size',
+            DECREASE_SIZE: 'Decrease Text Size',
+            RESET_SIZE: 'Reset Text Size',
+            DO_NOTHING: 'Do Nothing'
+        };
+
+        const DEFAULT_MAPPINGS = {
+            [GESTURES.WAVE_LEFT]: ACTIONS.SCROLL_UP,
+            [GESTURES.WAVE_RIGHT]: ACTIONS.SCROLL_DOWN,
+            [GESTURES.HAND_UP]: ACTIONS.INCREASE_SIZE,
+            [GESTURES.HAND_DOWN]: ACTIONS.DECREASE_SIZE,
+        };
+
+        const LOCAL_STORAGE_KEYS = {
+            TEXT_SIZE: 'gestureApp_textSize',
+            MAPPINGS: 'gestureApp_mappings'
+        };
+
+        const DEFAULT_TEXT_SIZE = 16; // in pixels
+        const TEXT_SIZE_STEP = 2; // in pixels
+        const MIN_TEXT_SIZE = 10;
+        const MAX_TEXT_SIZE = 30;
+
+        // --- DOM Elements ---
+        const webcamFeed = document.getElementById('webcamFeed');
+        const gestureCanvasElement = document.getElementById('gestureCanvas');
+        const gestureCanvasCtx = gestureCanvasElement.getContext('2d');
+        const detectedGestureDisplay = document.getElementById('detectedGesture');
+        const textViewer = document.getElementById('textViewer');
+        const resetSizeBtn = document.getElementById('resetSizeBtn');
+        const toggleSettingsBtn = document.getElementById('toggleSettingsBtn');
+        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const mappingsContainer = document.getElementById('mappingsContainer');
+        const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        const resetMappingsBtn = document.getElementById('resetMappingsBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const toastNotification = document.getElementById('toastNotification');
+
+        // --- Application State ---
+        let currentMappings = { ...DEFAULT_MAPPINGS };
+        let currentTextSize = DEFAULT_TEXT_SIZE;
+        let hands; // MediaPipe Hands instance
+        let lastWaveDirection = null;
+        let lastWaveTime = 0;
+        const WAVE_THRESHOLD_X = 0.08; // Movement threshold for wave detection (percentage of hand width)
+        const WAVE_COOLDOWN = 500; // ms between wave detections
+        let gestureDebounceTimer = null;
+        const GESTURE_DEBOUNCE_TIME = 300; // ms to wait before acting on a stable gesture
+
+        // --- Utility Functions ---
+        function showToast(message, duration = 3000) {
+            toastNotification.textContent = message;
+            toastNotification.classList.add('show');
+            setTimeout(() => {
+                toastNotification.classList.remove('show');
+            }, duration);
+        }
+
+        // --- Text Viewer Module ---
+        const TextViewerModule = {
+            init: () => {
+                const savedSize = localStorage.getItem(LOCAL_STORAGE_KEYS.TEXT_SIZE);
+                if (savedSize) {
+                    currentTextSize = parseInt(savedSize, 10);
+                }
+                TextViewerModule.applySize();
+                resetSizeBtn.addEventListener('click', () => TextViewerModule.performAction(ACTIONS.RESET_SIZE));
+            },
+            applySize: () => {
+                textViewer.style.fontSize = `${currentTextSize}px`;
+            },
+            performAction: (action) => {
+                switch (action) {
+                    case ACTIONS.SCROLL_UP:
+                        textViewer.scrollBy({ top: -50, behavior: 'smooth' });
+                        break;
+                    case ACTIONS.SCROLL_DOWN:
+                        textViewer.scrollBy({ top: 50, behavior: 'smooth' });
+                        break;
+                    case ACTIONS.INCREASE_SIZE:
+                        currentTextSize = Math.min(MAX_TEXT_SIZE, currentTextSize + TEXT_SIZE_STEP);
+                        TextViewerModule.applySize();
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.TEXT_SIZE, currentTextSize);
+                        break;
+                    case ACTIONS.DECREASE_SIZE:
+                        currentTextSize = Math.max(MIN_TEXT_SIZE, currentTextSize - TEXT_SIZE_STEP);
+                        TextViewerModule.applySize();
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.TEXT_SIZE, currentTextSize);
+                        break;
+                    case ACTIONS.RESET_SIZE:
+                        currentTextSize = DEFAULT_TEXT_SIZE;
+                        TextViewerModule.applySize();
+                        localStorage.setItem(LOCAL_STORAGE_KEYS.TEXT_SIZE, currentTextSize);
+                        showToast('Text size reset to default.');
+                        break;
+                }
+            }
+        };
+
+        // --- Settings Module ---
+        const SettingsModule = {
+            init: () => {
+                SettingsModule.loadMappings();
+                SettingsModule.renderMappingsUI();
+                toggleSettingsBtn.addEventListener('click', SettingsModule.openPanel);
+                closeSettingsBtn.addEventListener('click', SettingsModule.closePanel);
+                saveSettingsBtn.addEventListener('click', SettingsModule.saveMappings);
+                resetMappingsBtn.addEventListener('click', SettingsModule.resetMappings);
+            },
+            openPanel: () => {
+                settingsPanel.classList.remove('closed');
+                settingsPanel.classList.add('open');
+            },
+            closePanel: () => {
+                settingsPanel.classList.remove('open');
+                settingsPanel.classList.add('closed');
+            },
+            renderMappingsUI: () => {
+                mappingsContainer.innerHTML = ''; // Clear existing
+                Object.values(GESTURES).filter(g => g !== GESTURES.NONE).forEach(gesture => {
+                    const mapping = currentMappings[gesture] || ACTIONS.DO_NOTHING;
+                    const div = document.createElement('div');
+                    div.className = 'p-3 border border-slate-200 rounded-md bg-slate-50';
+
+                    const label = document.createElement('label');
+                    label.htmlFor = `map-${gesture}`;
+                    label.className = 'block text-sm font-medium text-slate-700 mb-1';
+                    label.textContent = gesture;
+                    div.appendChild(label);
+
+                    const select = document.createElement('select');
+                    select.id = `map-${gesture}`;
+                    select.dataset.gesture = gesture;
+                    select.className = 'mt-1 block w-full py-2 px-3 border border-slate-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm';
+
+                    Object.values(ACTIONS).forEach(action => {
+                        const option = document.createElement('option');
+                        option.value = action;
+                        option.textContent = action;
+                        if (action === mapping) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                    div.appendChild(select);
+                    mappingsContainer.appendChild(div);
+                });
+            },
+            saveMappings: () => {
+                const newMappings = {};
+                mappingsContainer.querySelectorAll('select').forEach(select => {
+                    newMappings[select.dataset.gesture] = select.value;
+                });
+                currentMappings = newMappings;
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MAPPINGS, JSON.stringify(currentMappings));
+                showToast('Settings saved!');
+                SettingsModule.closePanel();
+            },
+            loadMappings: () => {
+                const savedMappings = localStorage.getItem(LOCAL_STORAGE_KEYS.MAPPINGS);
+                if (savedMappings) {
+                    try {
+                        currentMappings = JSON.parse(savedMappings);
+                    } catch (e) {
+                        console.error("Error parsing saved mappings:", e);
+                        currentMappings = { ...DEFAULT_MAPPINGS }; // Fallback to defaults
+                    }
+                } else {
+                     currentMappings = { ...DEFAULT_MAPPINGS };
+                }
+            },
+            resetMappings: () => {
+                currentMappings = { ...DEFAULT_MAPPINGS };
+                SettingsModule.renderMappingsUI(); // Re-render with defaults
+                localStorage.setItem(LOCAL_STORAGE_KEYS.MAPPINGS, JSON.stringify(currentMappings));
+                showToast('Mappings reset to defaults.');
+            }
+        };
+
+        // --- Gesture Detector Module (MediaPipe) ---
+        const GestureDetectorModule = {
+            init: () => {
+                hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1, // 0 or 1. 1 is more accurate but slower.
+                    minDetectionConfidence: 0.6, // Stricter confidence
+                    minTrackingConfidence: 0.6
+                });
+
+                hands.onResults(GestureDetectorModule.onResults);
+
+                const camera = new Camera(webcamFeed, {
+                    onFrame: async () => {
+                        // Ensure canvas dimensions match video dimensions
+                        gestureCanvasElement.width = webcamFeed.videoWidth;
+                        gestureCanvasElement.height = webcamFeed.videoHeight;
+                        await hands.send({ image: webcamFeed });
+                    },
+                    width: 640, // Request a common webcam resolution
+                    height: 360
+                });
+                camera.start()
+                    .then(() => {
+                        loadingIndicator.style.display = 'none';
+                        showToast('Camera initialized. Show your hand!', 3000);
+                    })
+                    .catch(err => {
+                        console.error("Camera start failed:", err);
+                        loadingIndicator.textContent = 'Error: Could not access camera. Please check permissions.';
+                        showToast('Camera access failed. Please check permissions.', 5000);
+                    });
+            },
+
+            onResults: (results) => {
+                gestureCanvasCtx.save();
+                gestureCanvasCtx.clearRect(0, 0, gestureCanvasElement.width, gestureCanvasElement.height);
+                // Flip horizontally for mirror view
+                gestureCanvasCtx.translate(gestureCanvasElement.width, 0);
+                gestureCanvasCtx.scale(-1, 1);
+
+                let detectedGesture = GESTURES.NONE;
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const landmarks = results.multiHandLandmarks[0]; // Assuming one hand
+                    drawConnectors(gestureCanvasCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+                    drawLandmarks(gestureCanvasCtx, landmarks, { color: '#FF0000', lineWidth: 1, radius: 3 });
+                    
+                    detectedGesture = GestureDetectorModule.interpretGesture(landmarks);
+                }
+                
+                gestureCanvasCtx.restore(); // Restore context to prevent accumulation of transformations
+
+                // Debounce gesture processing
+                clearTimeout(gestureDebounceTimer);
+                gestureDebounceTimer = setTimeout(() => {
+                    if (detectedGesture !== GESTURES.NONE) {
+                        detectedGestureDisplay.textContent = detectedGesture;
+                        const action = currentMappings[detectedGesture];
+                        if (action && action !== ACTIONS.DO_NOTHING) {
+                            TextViewerModule.performAction(action);
+                            showToast(`Gesture: ${detectedGesture} -> Action: ${action}`, 1500);
+                        }
+                    } else {
+                         detectedGestureDisplay.textContent = "No gesture detected";
+                    }
+                }, GESTURE_DEBOUNCE_TIME);
+            },
+
+            interpretGesture: (landmarks) => {
+                // Landmarks indices: https://google.github.io/mediapipe/solutions/hands.html#hand-landmark-model
+                const wrist = landmarks[0];
+                const thumbTip = landmarks[4];
+                const indexFingerTip = landmarks[8];
+                const middleFingerTip = landmarks[12];
+                const ringFingerTip = landmarks[16];
+                const pinkyTip = landmarks[20];
+
+                const palmBaseX = (landmarks[0].x + landmarks[5].x + landmarks[17].x) / 3; // Avg of wrist, index_mcp, pinky_mcp
+                const palmBaseY = (landmarks[0].y + landmarks[5].y + landmarks[17].y) / 3;
+
+                // Helper to check if fingers are extended (roughly)
+                const isFingerExtended = (tip, mcp) => tip.y < mcp.y; // Tip is above MCP joint
+
+                // Hand Up: All fingers extended, fingertips above wrist/palm base
+                const allFingersUp = 
+                    isFingerExtended(thumbTip, landmarks[2]) && // Thumb relative to its base
+                    isFingerExtended(indexFingerTip, landmarks[5]) &&
+                    isFingerExtended(middleFingerTip, landmarks[9]) &&
+                    isFingerExtended(ringFingerTip, landmarks[13]) &&
+                    isFingerExtended(pinkyTip, landmarks[17]);
+                
+                if (allFingersUp && indexFingerTip.y < wrist.y && middleFingerTip.y < wrist.y) {
+                     return GESTURES.HAND_UP;
+                }
+
+                // Hand Down: All fingers extended downwards, fingertips below wrist/palm base
+                const allFingersDown = 
+                    thumbTip.y > landmarks[2].y && // Thumb tip below its base
+                    indexFingerTip.y > landmarks[5].y &&
+                    middleFingerTip.y > landmarks[9].y &&
+                    ringFingerTip.y > landmarks[13].y &&
+                    pinkyTip.y > landmarks[17].y;
+
+                if (allFingersDown && indexFingerTip.y > wrist.y && middleFingerTip.y > wrist.y) {
+                    return GESTURES.HAND_DOWN;
+                }
+                
+                // Wave Detection (simplified: based on horizontal movement of wrist)
+                // This is a very basic wave detection and might need refinement.
+                // It looks for a change in direction of the wrist's x-coordinate.
+                const currentTime = Date.now();
+                if (currentTime - lastWaveTime > WAVE_COOLDOWN) {
+                    if (typeof GestureDetectorModule.lastWristX === 'undefined') {
+                        GestureDetectorModule.lastWristX = wrist.x;
+                        GestureDetectorModule.waveMovementBuffer = [];
+                    }
+
+                    const movementX = wrist.x - GestureDetectorModule.lastWristX;
+                    GestureDetectorModule.waveMovementBuffer.push(movementX);
+                    if (GestureDetectorModule.waveMovementBuffer.length > 5) { // Analyze last 5 frames
+                        GestureDetectorModule.waveMovementBuffer.shift();
+                    }
+                    
+                    const netMovement = GestureDetectorModule.waveMovementBuffer.reduce((acc, val) => acc + val, 0);
+
+                    if (netMovement > WAVE_THRESHOLD_X && lastWaveDirection !== 'right') {
+                        lastWaveTime = currentTime;
+                        lastWaveDirection = 'right';
+                        GestureDetectorModule.lastWristX = wrist.x; // Reset after detection
+                        GestureDetectorModule.waveMovementBuffer = [];
+                        return GESTURES.WAVE_RIGHT;
+                    } else if (netMovement < -WAVE_THRESHOLD_X && lastWaveDirection !== 'left') {
+                        lastWaveTime = currentTime;
+                        lastWaveDirection = 'left';
+                        GestureDetectorModule.lastWristX = wrist.x; // Reset after detection
+                        GestureDetectorModule.waveMovementBuffer = [];
+                        return GESTURES.WAVE_LEFT;
+                    }
+                    
+                    // If no wave, update last position for next frame
+                    // Only update if significant movement to avoid drift when still
+                    if (Math.abs(movementX) > 0.01) {
+                         GestureDetectorModule.lastWristX = wrist.x;
+                    }
+                    // Reset direction if hand is relatively still
+                    if (Math.abs(netMovement) < WAVE_THRESHOLD_X / 2) {
+                        lastWaveDirection = null;
+                    }
+                }
+
+
+                return GESTURES.NONE;
+            }
+        };
+
+        // --- Main Application ---
+        document.addEventListener('DOMContentLoaded', () => {
+            TextViewerModule.init();
+            SettingsModule.init();
+            GestureDetectorModule.init(); // This will also handle loading indicator
+        });
+
+    </script>
+</body>
+</html>

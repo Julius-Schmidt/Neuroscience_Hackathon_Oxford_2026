@@ -1,0 +1,74 @@
+[gd_scene load_steps=3 format=3 uid="uid://5v8sm82tpwm3"]
+
+[ext_resource type="Script" path="res://hand_root.gd" id="1_xn1bf"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_f4iiy"]
+
+[node name="Node3D" type="Node3D"]
+
+[node name="HandRoot" type="Node3D" parent="."]
+script = ExtResource("1_xn1bf")
+
+[node name="Point0" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point1" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point2" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+skeleton = NodePath("../Point1")
+
+[node name="Point3" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point4" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point5" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point6" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point7" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point8" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point9" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point10" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point11" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point12" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point13" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point14" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point15" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point16" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point17" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point18" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point19" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
+
+[node name="Point20" type="MeshInstance3D" parent="HandRoot"]
+mesh = SubResource("SphereMesh_f4iiy")
