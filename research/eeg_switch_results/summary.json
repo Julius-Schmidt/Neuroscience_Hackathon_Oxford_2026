@@ -1,0 +1,49 @@
+{
+  "data": "PhysioNet eegmmidb runs 1-2",
+  "dev_subjects": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "test_subjects": [
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80
+  ],
+  "params": {
+    "srate": 250.0,
+    "feature": "rel",
+    "win_s": 1.0,
+    "step_s": 0.1,
+    "baseline_s": 20.0,
+    "on_db": 5.0,
+    "off_db": 3.0,
+    "dwell_s": 2.0,
+    "rearm_s": 1.0,
+    "artifact_uv": 200.0
+  },
+  "test": {
+    "subjects": 30,
+    "closures": 120,
+    "missed_rate": 0.8166666666666667,
+    "false_per_min": 0.0,
+    "delay_median_s": 3.139999999999997,
+    "delay_p90_s": 4.9087999999999985,
+    "subjects_all_missed": 21,
+    "minutes": 37.71386666666667
+  }
+}

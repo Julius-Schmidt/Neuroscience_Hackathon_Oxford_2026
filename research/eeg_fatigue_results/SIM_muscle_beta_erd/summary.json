@@ -1,0 +1,28 @@
+{
+  "participant": "SIM_muscle",
+  "measure": "beta_erd",
+  "channel": "C3",
+  "squeeze_cues": 140,
+  "onsets_found": 140,
+  "clean_epochs": 140,
+  "eeg_response_visible_in": [
+    "B1",
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "R1"
+  ],
+  "verdict": {
+    "rises": true,
+    "drops_after_rest": false,
+    "text": "ratio RISES with fatigue (last fatigue block 1.36, 95% 1.21-1.51) and does not clearly drop after rest (recovery 1.22). Brain effort alone x0.96 (0.88-1.05) -> muscle output fell but brain effort did not clearly rise: mostly muscle fatigue",
+    "trend_rho": 0.8285714285714287,
+    "brain_effort_rises": false,
+    "interpretation": "muscle output fell but brain effort did not clearly rise: mostly muscle fatigue"
+  },
+  "notes": [],
+  "simulated": true,
+  "file": "data\\fatigue\\SIM_muscle.npz"
+}

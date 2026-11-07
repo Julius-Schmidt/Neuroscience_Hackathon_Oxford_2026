@@ -9,3 +9,8 @@ pytest
 mediapipe
 opencv-python
 cv2-enumerate-cameras
+# EEG safety switch (eeg_switch/)
+mne
+pylsl
+scipy
+pandas
