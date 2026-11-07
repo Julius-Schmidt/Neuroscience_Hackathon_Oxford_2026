@@ -22,6 +22,11 @@ from collections import deque
 
 import numpy as np
 
+if __package__ in (None, ""):  # run as a file (e.g. VS Code Run button) rather than `python -m devtool`
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "devtool"
+
 from myomouse import config as MC
 
 from .ble import BandState, BleManager, FakeManager
