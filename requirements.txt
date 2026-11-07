@@ -3,4 +3,5 @@ numpy
 scikit-learn
 joblib
 pynput
+pygame-ce
 pytest

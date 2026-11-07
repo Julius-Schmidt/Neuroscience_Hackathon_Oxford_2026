@@ -103,3 +103,23 @@ def test_pointer_ignores_wrist_roll():
         dx, dy = p.update(q)
         moved += abs(dx) + abs(dy)
     assert moved < 1.0
+
+
+def test_arena_hits_and_misses():
+    from myomouse.arena import Arena
+
+    a = Arena(800, 600, ["left"])
+    tx, ty, r, want = a.target
+    a.move(tx - a.x, ty - a.y, now=0.0)          # cursor onto the target
+    a.button("right", True, now=1.0)              # wrong button -> miss
+    a.button("right", False, now=1.0)
+    a.button(want, True, now=2.0)                 # right button -> hit, new target
+    assert (a.hits, a.misses) == (1, 1)
+    a.inv_x, a.gain = True, 2.0
+    x0 = a.x
+    a.move(10, 0, now=5.0)
+    assert a.x == max(0, x0 - 20)                 # flipped and doubled (clamped at the edge)
+    a.button("left", True, now=6.0)
+    x1 = a.x
+    a.move(10, 0, now=6.05)                       # frozen right after a click
+    assert a.x == x1

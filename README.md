@@ -38,6 +38,7 @@ python -m myomouse.record --side left
 python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z false clicks"
 python -m myomouse.train  --side left
 python -m myomouse.run --dry-run --show   # watch live fist probabilities, no mouse control
+python -m myomouse.arena                  # practice: move a cursor + hit targets (real mouse untouched)
 python -m myomouse.run                    # the live demo (Ctrl+C to stop)
 python -m myomouse.off                    # let the bands sleep again (--deep powers them off)
 ```
@@ -47,6 +48,10 @@ python -m myomouse.off                    # let the bands sleep again (--deep po
 - **If the classifier misbehaves:** `python -m myomouse.run --mode threshold` uses a simple
   calibrated activation threshold instead.
 - **One band only:** `python -m myomouse.run --sides right`.
+- **Practice / tuning the cursor:** `python -m myomouse.arena` opens a window with its own cursor
+  and targets (blue = right fist, orange = left fist). `+`/`-` change the gain and `X`/`Y` flip
+  directions live; on exit it prints the values to paste into `config.py`. Before training,
+  use `--check` (cursor only, Space/Enter click).
 - **No hardware:** `python -m myomouse.run --fake --dry-run` (needs trained models).
 
 ## How it stays fast

@@ -76,6 +76,28 @@ def band_worker(side, mode, pointer, fake, q, show, check):
         band.stop()
 
 
+def start_bands(sides, mode, fake, show, check):
+    """Check bands.json / models exist, then start one process per band. Returns (queue, procs)."""
+    if not fake and not C.BANDS_FILE.exists():
+        raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
+    if not check:
+        from .detector import model_path
+        missing = [s for s in sides if not model_path(s).exists()]
+        if missing:
+            raise SystemExit(
+                f"No trained model for: {', '.join(missing)}.\n"
+                "  Train first:  python -m myomouse.record --side <side>  then  python -m myomouse.train --side <side>\n"
+                "  Or test the bands without a model:  python -m myomouse.run --check --dry-run")
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    procs = [ctx.Process(target=band_worker, daemon=True,
+                         args=(s, mode, s == C.POINTER_SIDE, fake, q, show, check))
+             for s in sides]
+    for p in procs:
+        p.start()
+    return q, procs
+
+
 class Mouse:
     def __init__(self, dry):
         self.dry = dry
@@ -125,23 +147,7 @@ def main():
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if args.check:
         args.show = True
-    if not args.fake and not C.BANDS_FILE.exists():
-        raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
-    if not args.check:
-        from .detector import model_path
-        missing = [s for s in sides if not model_path(s).exists()]
-        if missing:
-            raise SystemExit(
-                f"No trained model for: {', '.join(missing)}.\n"
-                "  Train first:  python -m myomouse.record --side <side>  then  python -m myomouse.train --side <side>\n"
-                "  Or test the bands without a model:  python -m myomouse.run --check --dry-run")
-    ctx = mp.get_context("spawn")
-    q = ctx.Queue()
-    procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(s, args.mode, s == C.POINTER_SIDE, args.fake, q, args.show, args.check))
-             for s in sides]
-    for p in procs:
-        p.start()
+    q, procs = start_bands(sides, args.mode, args.fake, args.show, args.check)
 
     mouse = Mouse(args.dry_run)
     freeze_until = 0.0
