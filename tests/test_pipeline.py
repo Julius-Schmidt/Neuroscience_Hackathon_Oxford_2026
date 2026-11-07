@@ -123,3 +123,99 @@ def test_arena_hits_and_misses():
     x1 = a.x
     a.move(10, 0, now=6.05)                       # frozen right after a click
     assert a.x == x1
+
+
+def fake_camera(sess, delay=0.3, late=0.2, fps=30, stray=(3.0, 4.0), blind=None):
+    """Camera that sees the hand close `delay` s after each fist cue and open `late` s after it ends."""
+    t_emg = np.arange(len(sess["emg"])) / C.EMG_HZ
+    closed = []
+    for g in np.unique(sess["seg"][sess["label"] == FIST]):
+        idx = np.flatnonzero(sess["seg"] == g)
+        closed.append((t_emg[idx[0]] + delay, t_emg[idx[-1]] + late))
+    closed.append(stray)  # a fist during the first "relax" block
+    cam_t = np.arange(0, t_emg[-1], 1 / fps)
+    ratio = np.full(len(cam_t), 2.0)
+    for a, b in closed:
+        ratio[(cam_t >= a) & (cam_t < b)] = 1.0
+    if blind:
+        ratio[(cam_t >= blind[0]) & (cam_t < blind[1])] = np.nan
+    return t_emg, cam_t, ratio
+
+
+def test_closure_ratio_open_vs_fist():
+    from myomouse.vision import closure_ratio
+    pts = np.zeros((21, 3))
+    for k, (mcp, tip) in enumerate(zip((5, 9, 13, 17), (8, 12, 16, 20))):
+        pts[mcp] = (k * 0.02 - 0.03, 0.08, 0)
+        pts[tip] = (k * 0.02 - 0.03, 0.16, 0)   # straight finger: tip twice as far as knuckle
+    open_r = closure_ratio(pts)
+    for k, tip in enumerate((8, 12, 16, 20)):
+        pts[tip] = (k * 0.02 - 0.03, 0.07, 0.03)  # curled back towards the palm
+    assert open_r == pytest.approx(2.0, rel=0.05)
+    assert closure_ratio(pts) < 1.2
+
+
+def test_vision_labels_follow_the_hand_not_the_cue():
+    from myomouse.vision import vision_labels
+    s = synth_session("right")
+    t, cam_t, ratio = fake_camera(s)
+    lab, report = vision_labels(t, s["label"], s["seg"], cam_t, ratio, lag=0.0, margin=0.08)
+    assert any("timed by the camera" in r for r in report), report
+
+    g = int(s["seg"][np.argmax(s["label"] == FIST)])        # first cued fist
+    idx = np.flatnonzero(s["seg"] == g)
+    t0, t1 = t[idx[0]], t[idx[-1]]
+    assert (lab[(t > t0 - 0.25) & (t < t0 + 0.2)] == 0).all()          # cue said fist, hand still open
+    assert (lab[(t > t0 + 0.2) & (t < t0 + 0.38)] != FIST).all()      # closing: left out
+    assert (lab[(t > t0 + 0.45) & (t < t1)] == FIST).all()          # hand visibly closed
+    assert (lab[(t > t1 + 0.05) & (t < t1 + 0.2 - 0.1)] == FIST).all()  # still closed after the cue
+    assert (lab[(t > t1 + 0.35) & (t < t1 + 0.8)] == 0).all()         # opened again
+    assert (lab[(t > 3.1) & (t < 3.9)] == IGNORE).all()               # stray fist while "relaxing"
+
+
+def test_vision_labels_fall_back_to_cue_without_a_hand():
+    from myomouse.vision import vision_labels
+    s = synth_session("right")
+    t, cam_t, ratio = fake_camera(s)
+    lab, report = vision_labels(t, s["label"], s["seg"], cam_t, np.full_like(ratio, np.nan))
+    assert (lab == s["label"]).all() and "cue timing only" in report[0]
+    # hand out of view for one fist: that fist keeps its cue labels
+    g = int(s["seg"][np.argmax(s["label"] == FIST)])
+    idx = np.flatnonzero(s["seg"] == g)
+    t, cam_t, ratio = fake_camera(s, blind=(t[idx[0]] - 0.5, t[idx[-1]] + 1.0))
+    lab, report = vision_labels(t, s["label"], s["seg"], cam_t, ratio, lag=0.0)
+    assert (lab[idx] == s["label"][idx]).all()
+    assert any("out of view" in r for r in report), report
+
+
+def test_train_with_camera_labels(tmp_dirs, monkeypatch):
+    from myomouse.vision import vision_labels
+    for sid in range(2):
+        s = synth_session("right", seed=sid)
+        t, cam_t, ratio = fake_camera(s, delay=0.0, late=0.0, stray=(0, 0))
+        lab, _ = vision_labels(t, s["label"], s["seg"], cam_t, ratio, lag=0.0)
+        np.savez(C.DATA_DIR / f"right_s{sid}.npz", emg=s["emg"], label=lab, label_cue=s["label"],
+                 seg=s["seg"], t=t, cam_t=cam_t, cam_ratio=ratio, side="right", fs=C.EMG_HZ)
+    for labels in ("camera", "cue"):
+        monkeypatch.setattr("sys.argv", ["train", "--side", "right", "--labels", labels])
+        train.main()
+        assert load_model("right")["pipeline"] is not None
+
+
+def test_playground_left_recolours_right_drags():
+    from myomouse.playground import Playground
+    pg = Playground(900, 800)
+    b = pg.blocks[0]
+    x, y = b["rect"][0] + 10, b["rect"][1] + 10
+    c0 = b["color"]
+    pg.press("left", x, y, 0.0)
+    pg.release("left", x, y, 0.1)
+    assert b["color"] == c0 + 1
+    pg.press("right", x, y, 1.0)             # grab
+    pg.motion(x + 300, y + 50)               # drag
+    pg.release("right", x + 300, y + 50, 1.5)
+    pg.motion(x + 500, y + 300)              # released: block stays
+    assert b["rect"][:2] == [b["rect"][0], b["rect"][1]] and b["rect"][0] == x - 10 + 300
+    assert b["rect"][1] == y - 10 + 50 and b["color"] == c0 + 1
+    pg.press("left", 5, 5, 2.0)              # empty space: just a click
+    assert pg.clicks == {"left": 2, "right": 1}

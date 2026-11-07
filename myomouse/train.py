@@ -5,6 +5,9 @@
 
 Saves models/fist_<side>.joblib with both an LDA model and a threshold fallback,
 and prints how many clicks it would have caught / falsely fired on the recording.
+
+Recordings made with the camera carry camera-timed labels, which are used by default.
+`--labels cue` trains on the plain cue timing instead (to compare the two).
 """
 
 import argparse
@@ -23,11 +26,19 @@ from .features import envelope, sliding_features
 from .record import FIST, IGNORE
 
 
-def load_sessions(side):
+def load_sessions(side, labels="camera"):
     files = sorted(C.DATA_DIR.glob(f"{side}_*.npz"))
     if not files:
         raise SystemExit(f"No recordings for {side} in {C.DATA_DIR}. Run myomouse.record first.")
-    return [dict(np.load(f)) | {"file": f.name} for f in files]
+    out = []
+    for f in files:
+        s = dict(np.load(f)) | {"file": f.name}
+        s.setdefault("label_cue", s["label"])  # older recordings: cue timing only
+        s["camera"] = "cam_t" in s
+        if labels == "cue":
+            s["label"] = s["label_cue"]
+        out.append(s)
+    return out
 
 
 def windows(sess, window, step):
@@ -43,7 +54,7 @@ def windows(sess, window, step):
 def event_report(model, mode, sess):
     """Replay the recording through the live detector and score it like a demo would."""
     det = FistDetector(model, mode)
-    lab, seg = sess["label"], sess["seg"]
+    lab, seg = sess["label_cue"], sess["seg"]  # score against what you were asked to do
     presses = []
     for i, s in enumerate(sess["emg"]):
         if det.push(s) == "press":
@@ -71,14 +82,17 @@ def event_report(model, mode, sess):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--side", choices=["left", "right"], required=True)
+    ap.add_argument("--labels", choices=["camera", "cue"], default="camera",
+                    help="camera-timed labels (default, where recorded) or plain cue timing")
     args = ap.parse_args()
 
-    sessions = load_sessions(args.side)
+    sessions = load_sessions(args.side, args.labels)
     parts = []
     for sid, s in enumerate(sessions):
         s["sid"] = sid
         parts.append(windows(s, C.WINDOW, C.STEP))
-        print(f"{s['file']}: {len(s['emg']) / C.EMG_HZ:.0f} s")
+        src = "camera labels" if s["camera"] and args.labels == "camera" else "cue labels"
+        print(f"{s['file']}: {len(s['emg']) / C.EMG_HZ:.0f} s, {src}")
     X = np.concatenate([p[0] for p in parts])
     y = np.concatenate([p[1] for p in parts])
     groups = np.concatenate([p[2] for p in parts])

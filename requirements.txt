@@ -5,3 +5,7 @@ joblib
 pynput
 pygame-ce
 pytest
+# camera labels while recording (not needed for the live demo)
+mediapipe
+opencv-python
+cv2-enumerate-cameras

@@ -9,6 +9,11 @@ do now and counts down to the next squeeze. Nothing is recorded while you're rea
 
 The "relax while moving your arm" parts matter most: they teach the classifier that
 pointing is NOT a fist.
+
+By default a webcam watches your hand while you record (see vision.py): the fist labels
+then follow when your hand actually closed, not when the cue said so. Put the laptop so
+the camera sees the hand of the arm you record. --no-camera records with cue timing only.
+The camera is only used here; the live demo runs on the Myo bands alone.
 """
 
 import argparse
@@ -77,10 +82,51 @@ def status_line(steps, i, t_in):
     return f"{GREEN}     {cue:^22}     {RESET}  {bar(1 - t_in / dur)}  {left:4.1f} s left"
 
 
-def countdown():
+def cue_ui(steps, i, t_in):
+    """Same as status_line, for the camera window: big red/green banner + countdown."""
+    label, dur, cue = steps[i]
+    left = dur - t_in
+    if label == FIST:
+        return {"cue": cue, "color": "red", "sub": f"{left:3.1f} s", "progress": left / dur}
+    nxt = steps[i + 1] if i + 1 < len(steps) else None
+    if nxt and nxt[0] == FIST:
+        return {"cue": cue, "color": "green", "sub": f"{nxt[2]} in {left:3.1f} s"}
+    return {"cue": cue, "color": "green", "sub": f"{left:4.1f} s left", "progress": 1 - t_in / dur}
+
+
+def window(cam):
+    """True if instructions go to the camera window instead of the terminal."""
+    return cam is not None and cam.preview
+
+
+def tick(cam, ui=None, seconds=0.03):
+    """Wait a moment; keeps the camera window alive (it has to be drawn from the main thread)."""
+    if cam is None:
+        time.sleep(seconds)
+    elif cam.show(ui, max(1, int(seconds * 1000))) in (27, ord("q")):
+        raise KeyboardInterrupt
+
+
+def wait_start(cam, prompt, ui):
+    """Wait for SPACE/Enter in the camera window (or Enter in the terminal without one)."""
+    if not window(cam):
+        input(prompt)
+        return
+    ui = dict(ui, footer="SPACE = start    ESC = quit")
+    while True:
+        key = cam.show(ui, 30)
+        if key in (13, 10, 32):
+            return
+        if key in (27, ord("q")):
+            raise KeyboardInterrupt
+
+
+def countdown(cam=None, ui=None):
     for k in (3, 2, 1):
         print(f"{CLEAR_LINE}  starting in {BOLD}{k}{RESET} ...", end="", flush=True)
-        time.sleep(1.0)
+        end = time.perf_counter() + 1.0
+        while time.perf_counter() < end:
+            tick(cam, dict(ui or {}, cue=f"starting in {k}", color=None))
     print(CLEAR_LINE, end="")
 
 
@@ -89,10 +135,16 @@ def main():
     ap.add_argument("--side", choices=["left", "right"], required=True)
     ap.add_argument("--fake", action="store_true", help="simulated band, for testing")
     ap.add_argument("--no-wait", action="store_true", help="don't wait for Enter between blocks")
+    ap.add_argument("--no-camera", action="store_true", help="label by cue timing only, no webcam")
+    ap.add_argument("--camera-index", type=int, default=None, help="webcam to use (default: built-in)")
+    ap.add_argument("--swap-hands", action="store_true",
+                    help="if the camera tracks your other hand (e.g. an already-mirrored webcam)")
+    ap.add_argument("--no-preview", action="store_true", help="use the camera but don't show its window")
     args = ap.parse_args()
 
     blocks = protocol(args.side)
-    emg, labels, segs = [], [], []
+    emg, labels, segs, times = [], [], [], []
+    t_ref = time.perf_counter()  # shared clock for EMG and camera
     # what the EMG handler should label incoming samples with; None = not recording
     state = {"steps": None, "bounds": None, "t0": None, "seg0": 0}
 
@@ -108,6 +160,14 @@ def main():
         emg.append(sample)
         labels.append(lab)
         segs.append(state["seg0"] + i)
+        times.append(time.perf_counter() - t_ref)
+
+    cam = None
+    if not args.no_camera:
+        from .vision import HandCamera
+        cam = HandCamera(args.side, t_ref, index=args.camera_index, swap_hands=args.swap_hands,
+                         preview=not args.no_preview)
+        cam.start()
 
     band = open_band(args.side, fake=args.fake)
     band.add_emg_handler(on_emg)
@@ -117,12 +177,23 @@ def main():
 
     seg0 = 0
     try:
+        if window(cam):
+            print(f"\n{BOLD}Follow the camera window{RESET} (SPACE there starts each part, ESC quits).")
+        if cam is not None:
+            wait_start(cam, f"  {DIM}camera check: press Enter when it tracks your hand{RESET} ", {
+                "title": f"Camera check - {args.side} arm",
+                "lines": [f"Place the laptop so the camera sees your {args.side.upper()} hand, "
+                          "also while you move your arm.",
+                          "Open and close the hand: the skeleton should follow it.",
+                          f"Then press SPACE. {len(blocks)} parts, {total:.0f} s of recording in total."]})
         for b, (title, text, steps) in enumerate(blocks, 1):
             dur = sum(d for _, d, _ in steps)
             print(f"\n{BOLD}[{b}/{len(blocks)}] {title}{RESET}  ({dur:.0f} s)\n  {text}")
+            intro = {"title": f"[{b}/{len(blocks)}] {title}  ({dur:.0f} s)",
+                     "lines": [ln.strip() for ln in text.split("\n")]}
             if not args.no_wait:
-                input(f"  {DIM}press Enter when ready{RESET} ")
-            countdown()
+                wait_start(cam, f"  {DIM}press Enter when ready{RESET} ", intro)
+            countdown(cam, {"title": intro["title"]})
 
             bounds = np.cumsum([0.0] + [d for _, d, _ in steps])
             state.update(steps=steps, bounds=bounds, seg0=seg0, t0=time.perf_counter())
@@ -133,20 +204,45 @@ def main():
                 i = int(np.searchsorted(bounds, t, side="right") - 1)
                 if i >= len(steps):
                     break
-                print(CLEAR_LINE + status_line(steps, i, t - bounds[i]), end="", flush=True)
-                time.sleep(0.03)
+                line = status_line(steps, i, t - bounds[i])
+                if cam is not None:
+                    line += f"  {DIM}{cam.status()}{RESET}"
+                print(CLEAR_LINE + line, end="", flush=True)
+                tick(cam, dict(cue_ui(steps, i, t - bounds[i]), title=f"[{b}/{len(blocks)}] {title}"))
             state["steps"] = None  # stop recording while the next instructions are read
             seg0 += len(steps)
             print(f"{CLEAR_LINE}  {GREEN}done{RESET}")
     except KeyboardInterrupt:
+        if cam is not None:
+            cam.stop()
         raise SystemExit("\naborted, nothing saved")
     finally:
         band.stop()
 
+    cue = np.asarray(labels)
+    extra = {}
+    final = cue
+    if cam is not None:
+        from .vision import vision_labels
+        cam_t, cam_r = np.asarray(cam.times), np.asarray(cam.ratios)
+        final, report = vision_labels(np.asarray(times), cue, np.asarray(segs), cam_t, cam_r)
+        print()
+        for line in report:
+            print(" ", line)
+        extra = {"cam_t": cam_t, "cam_ratio": cam_r}
+        if window(cam):  # summary in the window too; closes by itself
+            ui = {"title": "Recording done - saved", "footer": "any key = close",
+                  "lines": [ln.removeprefix("camera: ") for ln in report]}
+            end = time.perf_counter() + 10
+            while time.perf_counter() < end and cam.show(ui, 30) == -1:
+                pass
+        cam.stop()
+
     C.DATA_DIR.mkdir(exist_ok=True)
     out = C.DATA_DIR / f"{args.side}_{time.strftime('%Y%m%d-%H%M%S')}.npz"
-    np.savez(out, emg=np.asarray(emg, dtype=np.int8), label=np.asarray(labels),
-             seg=np.asarray(segs), side=args.side, fs=C.EMG_HZ)
+    # label = what train uses (camera-refined if available), label_cue = the plain cue timing
+    np.savez(out, emg=np.asarray(emg, dtype=np.int8), label=final, label_cue=cue,
+             seg=np.asarray(segs), t=np.asarray(times), side=args.side, fs=C.EMG_HZ, **extra)
     n = len(emg)
     print(f"\nsaved {out}: {n} samples ({n / C.EMG_HZ:.1f} s, expected ~{total:.0f} s)")
     if n < 0.8 * C.EMG_HZ * total:

@@ -24,6 +24,7 @@ No dongle needed. On macOS, give your terminal / VS Code these permissions in
 System Settings → Privacy & Security:
 - **Bluetooth**, to find and connect to the bands
 - **Accessibility**, otherwise the mouse won't move
+- **Camera**, only for recording training data (see below)
 
 Close Myo Connect and any other script using the bands first: a band only accepts one connection.
 
@@ -33,16 +34,31 @@ Close Myo Connect and any other script using the bands first: a band only accept
 python -m myomouse.identify            # each band vibrates, you say which arm -> bands.json
 python -m myomouse.run --check --dry-run  # no model needed: EMG rate (~200 Hz) + muscle activity bars
 python -m myomouse.run --check            # same, and the right band moves the cursor (tune gain/invert)
-python -m myomouse.record --side right # ~2 min, follow the cues
+python -m myomouse.record --side right # ~2 min, follow the cues (webcam watches your hand)
 python -m myomouse.record --side left
 python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z false clicks"
 python -m myomouse.train  --side left
 python -m myomouse.run --dry-run --show   # watch live fist probabilities, no mouse control
 python -m myomouse.arena                  # practice: move a cursor + hit targets (real mouse untouched)
-python -m myomouse.run                    # the live demo (Ctrl+C to stop)
+python -m myomouse.run                    # the live demo + playground window (Esc / Ctrl+C to stop)
 python -m myomouse.off                    # let the bands sleep again (--deep powers them off)
 ```
 
+- **Camera labels:** while you record, the webcam (MediaPipe hand tracking) checks when your
+  hand *actually* closed and opened, and the fist labels follow that instead of the cue timing
+  (your reaction time, holding too long, a fist while you should relax). Put the laptop so it
+  sees the hand of the arm you're recording. The camera window shows the instructions and cues;
+  SPACE there starts each part, ESC quits. If the window says it sees the wrong hand, use
+  `--swap-hands`. Where the camera can't tell, those bits are left out or keep the cue timing.
+  It's only used for training: `run` controls the mouse with the Myo bands alone.
+  `--no-camera` records the old way; `train --labels cue` trains without the camera labels,
+  so you can compare the "caught X/Y fists, Z false clicks" lines.
+  Settings: `VISION_*` in [config.py](myomouse/config.py).
+- **Playground (`run`):** the bands move the real mouse, and a window shows the cursor trail,
+  every click (blue ripple = left, orange = right), which buttons are held, live fist
+  probabilities and an event log. Left-click a block to change its colour; hold the right
+  button (left fist) on a block to drag it. Works anywhere else on the desktop too.
+  `--no-window` = terminal only; `--dry-run` = window draws its own cursor, real mouse untouched.
 - **Different demo user:** re-record and re-train both arms. Recording more sessions for the
   same person adds to the training data, because `train` uses every `data/<side>_*.npz`.
 - **If the classifier misbehaves:** `python -m myomouse.run --mode threshold` uses a simple
