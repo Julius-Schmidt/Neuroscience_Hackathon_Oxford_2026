@@ -1,0 +1,6 @@
+bleak
+numpy
+scikit-learn
+joblib
+pynput
+pytest
