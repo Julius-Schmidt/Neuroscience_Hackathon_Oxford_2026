@@ -152,11 +152,15 @@ async def run():
         controller = FlappyController()
         await client.start_notify(EMG_DATA_UUID, controller.process_emg)
 
-        while True:
-            if keyboard.is_pressed('q'):
-                print("\nQuitting...")
-                break
-            await asyncio.sleep(0.01)
+        try:
+            while True:
+                if keyboard.is_pressed('q'):
+                    print("\nQuitting...")
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            # Let the band fall asleep again on its own
+            await client.write_gatt_char(CMD_UUID, bytes([0x09, 0x01, 0x00]))
 
 
 if __name__ == "__main__":

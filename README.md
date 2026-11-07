@@ -39,6 +39,7 @@ python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z 
 python -m myomouse.train  --side left
 python -m myomouse.run --dry-run --show   # watch live fist probabilities, no mouse control
 python -m myomouse.run                    # the live demo (Ctrl+C to stop)
+python -m myomouse.off                    # let the bands sleep again (--deep powers them off)
 ```
 
 - **Different demo user:** re-record and re-train both arms. Recording more sessions for the

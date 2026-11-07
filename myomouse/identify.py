@@ -11,7 +11,7 @@ import json
 import sys
 
 from . import config as C
-from .device import COMMAND_UUID, CMD_NEVER_SLEEP, cmd_vibrate, discover_myos
+from .device import COMMAND_UUID, cmd_vibrate, discover_myos
 
 
 async def buzz(address):
@@ -22,7 +22,6 @@ async def buzz(address):
         print(f"  could not reconnect to {address}")
         return False
     async with BleakClient(dev) as client:
-        await client.write_gatt_char(COMMAND_UUID, CMD_NEVER_SLEEP, response=True)
         for _ in range(3):
             await client.write_gatt_char(COMMAND_UUID, cmd_vibrate(2), response=True)
             await asyncio.sleep(0.7)
