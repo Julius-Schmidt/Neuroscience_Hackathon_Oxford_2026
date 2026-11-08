@@ -82,3 +82,18 @@ frame(ax, "Tremor (simulated): a 200 ms hold stops tremor turning into clicks",
       "Cost: clicks land ~170 ms later. At 75% tremor: 63% caught, 5 false clicks/min.")
 fig.tight_layout(); fig.savefig(out / "3_tremor.png", dpi=160); plt.close(fig)
 print("ok")
+
+# 4 live rescaling (today's model, live detector code)
+import json
+j = json.load(open(out / "live_rescale.json"))
+fig, ax = plt.subplots(figsize=(9, 4.6))
+for key, col, text in (("standard", ORANGE, "live decoder as before"), ("rescale", BLUE, "live decoder + --rescale")):
+    y = j[key]["caught"]
+    ax.plot(j["strength"], y, color=col, lw=2); ax.plot(j["strength"], y, "o", ms=8, color=col, mec=SURF, mew=2)
+    i = 2 if key == "standard" else 4
+    ax.annotate(text, (j["strength"][i], y[i]), xytext=(8, -16 if key == "standard" else 8), textcoords="offset points", color=INK, fontsize=11)
+ax.set_xlim(105, -12); ax.set_ylim(0, 108); ax.set_xticks([100, 80, 60, 40, 20, 0])
+ax.set_xlabel("simulated strength (% of Dylan's)"); ax.set_ylabel("squeezes caught (%)")
+frame(ax, "In the live mouse now: clicks still work at 18% strength",
+      "Same recording and scoring. False clicks with --rescale: 0.3 to 0.8 per minute.")
+fig.tight_layout(); fig.savefig(out / "4_live_rescale.png", dpi=160); plt.close(fig)
