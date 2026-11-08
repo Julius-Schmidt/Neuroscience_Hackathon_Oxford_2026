@@ -1,4 +1,4 @@
-"""Practice arena: move an on-screen cursor with your forearm and hit targets with fists.
+"""Practice arena: move an on-screen cursor and hit targets with clicks (index lifts or fists).
 
 The arena draws its own cursor, so the real mouse is never touched: no Accessibility
 permission needed and no stray clicks on your desktop. It uses the same band processes
@@ -8,8 +8,10 @@ as `myomouse.run`, so what works here works in the live demo.
     python -m myomouse.arena --user julius --sides right  # pointer band only (left-click targets only)
     python -m myomouse.arena --check                      # no models yet: cursor only, Space/Enter click
     python -m myomouse.arena --user julius --fake         # no hardware
+    python -m myomouse.arena --user julius --move air     # the original 3D pointing + fist
+    python -m myomouse.arena --user julius --click index  # experimental: index lift
 
-Targets:  blue = left click (right fist),  orange = right click (left fist).
+Targets:  blue = left click (right hand),  orange = right click (left hand).
 Keys:  +/- gain   X/Y flip direction   C re-centre   R reset score   F fullscreen   Esc quit
        Space / Enter = left / right click from the keyboard
 """
@@ -21,6 +23,7 @@ import time
 from collections import deque
 
 from . import config as C
+from .gestures import WORD, add_style_args
 from .run import start_bands
 from .users import add_user_arg, require_user
 
@@ -96,6 +99,7 @@ class Arena:
 def main():
     ap = argparse.ArgumentParser()
     add_user_arg(ap, required=False)
+    add_style_args(ap)
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
     ap.add_argument("--sides", default="right,left")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
@@ -108,7 +112,10 @@ def main():
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if C.POINTER_SIDE not in sides:
         print(f"note: the pointer band ({C.POINTER_SIDE}) isn't running, so the cursor won't move")
-    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check, args.click, args.move, args.axes)
+    word = WORD[args.click]
+    table = args.move in ("table", "slide")
+    gain_x = C.TABLE_GAIN_TURN if table else C.GAIN_X
     status = {s: "connecting..." for s in sides}
     probs = {s: 0.0 for s in sides}
 
@@ -198,7 +205,7 @@ def main():
             col = BUTTON_COLOR[want]
             pygame.draw.circle(screen, col, (tx, ty), r, 4)
             pygame.draw.circle(screen, col, (tx, ty), 5)
-            text(f"{want} click ({SIDE_FOR_BUTTON[want]} fist)", (tx - r, ty + r + 6), col)
+            text(f"{want} click ({SIDE_FOR_BUTTON[want]} {word})", (tx - r, ty + r + 6), col)
 
             if len(arena.trail) > 1:
                 pygame.draw.lines(screen, (70, 76, 92), False, list(arena.trail), 2)
@@ -217,12 +224,12 @@ def main():
             last = arena.times[-1] if arena.times else 0
             text(f"hits {arena.hits}   misses {arena.misses}   avg {avg:.2f} s   last {last:.2f} s",
                  (16, 12), FG, big)
-            text(f"gain x{arena.gain:.2f} (= {C.GAIN_X * arena.gain:.0f} px/rad)   "
+            text(f"{args.move}, axes {args.axes} | gain x{arena.gain:.2f} (= {gain_x * arena.gain:.0f} px/rad)   "
                  f"flip x: {'on' if arena.inv_x else 'off'}   flip y: {'on' if arena.inv_y else 'off'}",
                  (16, 48), DIM)
 
             y = arena.h - 30 - 26 * len(sides)
-            label = "activity" if args.check else "fist p"
+            label = "activity" if args.check else f"{args.click} p"
             for s in sides:
                 bar_w = 200
                 bcol = BUTTON_COLOR[C.BUTTON_FOR_SIDE[s]]
@@ -248,8 +255,15 @@ def main():
         print(f"hits {arena.hits}, misses {arena.misses}")
         if arena.gain != 1.0 or arena.inv_x or arena.inv_y:
             print("To keep these settings, put this in myomouse/config.py:")
-            print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_Y = {C.GAIN_Y * arena.gain:.0f}")
-            print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
+            if table:
+                y_gain = ("TABLE_GAIN_SLIDE", C.TABLE_GAIN_SLIDE) if args.move == "slide" else ("TABLE_GAIN_Y", C.TABLE_GAIN_Y)
+                print(f"  TABLE_GAIN_TURN = {C.TABLE_GAIN_TURN * arena.gain:.0f}\n"
+                      f"  {y_gain[0]} = {y_gain[1] * arena.gain:.0f}")
+                print(f"  TABLE_INVERT_X = {arena.inv_x != C.TABLE_INVERT_X}\n"
+                      f"  TABLE_INVERT_Y = {arena.inv_y != C.TABLE_INVERT_Y}")
+            else:
+                print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_Y = {C.GAIN_Y * arena.gain:.0f}")
+                print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
 
 
 if __name__ == "__main__":

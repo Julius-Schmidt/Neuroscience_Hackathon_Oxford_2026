@@ -1,14 +1,16 @@
 """Webcam hand tracking, used ONLY while recording training data (the live demo is Myo-only).
 
-The cue timing in `record` says when you *should* squeeze; the camera sees when you
-actually did. MediaPipe tracks the hand and we measure how closed it is:
+The cue timing in `record` says when you *should* click; the camera sees when you
+actually did. MediaPipe tracks the hand and we measure, per frame (3D world coordinates,
+so it doesn't depend on distance to the camera or hand rotation):
 
-    ratio = mean over the 4 fingers of |fingertip - wrist| / |knuckle - wrist|
-            (~2 with an open hand, ~1 with a fist; 3D world coordinates, so it
-             doesn't depend on distance to the camera or hand rotation)
+    --click fist:   ratio = mean over the 4 fingers of |fingertip - wrist| / |knuckle - wrist|
+                    (~2 with an open hand, ~1 with a fist; LOWER = clicking)
+    --click index:  angle (radians) between the index finger and the middle + ring fingers
+                    (small when resting on the table, big when the index is lifted; HIGHER = clicking)
 
-After the recording, `vision_labels` uses that to move each fist label to when the
-hand was really closed. It only ever makes labels more cautious: wherever camera and
+After the recording, `vision_labels` uses that to move each click label to when the
+hand really did it. It only ever makes labels more cautious: wherever camera and
 cue disagree in a way it can't resolve, the samples are left out of training.
 """
 
@@ -37,6 +39,27 @@ def closure_ratio(pts) -> float:
     return float(np.mean(tip / np.maximum(mcp, 1e-6)))
 
 
+def _unit(v):
+    return v / max(float(np.linalg.norm(v)), 1e-9)
+
+
+def index_lift_angle(pts) -> float:
+    """pts: 21 (x, y, z) points. Angle between the index finger (knuckle -> tip) and the
+    middle + ring fingers. ~0 with all fingers resting, grows as the index lifts off the table."""
+    p = np.asarray(pts, dtype=np.float64)
+    index = _unit(p[8] - p[5])
+    others = _unit(_unit(p[12] - p[9]) + _unit(p[16] - p[13]))
+    return float(np.arccos(np.clip(index @ others, -1.0, 1.0)))
+
+
+# per click gesture: camera measure, whether a LOWER value means "clicking", minimum
+# rest-vs-click difference to trust the camera, and words for messages
+METRIC = {
+    "fist": {"fn": closure_ratio, "low_is_active": True, "rest": "open hand", "active": "fist"},
+    "index": {"fn": index_lift_angle, "low_is_active": False, "rest": "index down", "active": "index up"},
+}
+
+
 # --------------------------------------------------------------------------- labels
 
 def _hysteresis(closed_amount, on, off):
@@ -55,19 +78,24 @@ def _hysteresis(closed_amount, on, off):
     return out
 
 
-def vision_labels(emg_t, cue, seg, cam_t, cam_ratio, lag=None, margin=None, early=None, spill=None):
+def vision_labels(emg_t, cue, seg, cam_t, cam_ratio, lag=None, margin=None, early=None, spill=None,
+                  click="fist"):
     """Refine cue labels with the camera.
 
     emg_t:   arrival time (s) of every EMG sample      cue: cue label per sample (REST/FIST/IGNORE)
     seg:     cue segment id per sample                 cam_t, cam_ratio: per camera frame (nan = no hand)
+    click:   which gesture cam_ratio measures (see METRIC)
     Returns (labels, report_lines).
     """
+    m = METRIC[click]
+    min_gap = C.VISION_MIN_GAP if click == "fist" else C.VISION_MIN_GAP_INDEX
+    sign = -1.0 if m["low_is_active"] else 1.0  # work on "higher = clicking" internally
     lag = C.VISION_LAG_S if lag is None else lag
     margin = C.VISION_MARGIN_S if margin is None else margin
     early = C.VISION_EARLY_S if early is None else early
     spill = C.VISION_SPILL_S if spill is None else spill
     emg_t, cue, seg = np.asarray(emg_t, float), np.asarray(cue), np.asarray(seg)
-    cam_t, cam_ratio = np.asarray(cam_t, float) - lag, np.asarray(cam_ratio, float)
+    cam_t, cam_ratio = np.asarray(cam_t, float) - lag, sign * np.asarray(cam_ratio, float)
     labels = cue.copy()
     if len(cam_t) < 10 or np.isfinite(cam_ratio).sum() < 10:
         return labels, ["camera: no hand seen - using the cue timing only"]
@@ -88,19 +116,19 @@ def vision_labels(emg_t, cue, seg, cam_t, cam_ratio, lag=None, margin=None, earl
         zone |= z
         zones.append((g, t0, z))
 
-    # calibrate open / fist hand shape from this recording
-    open_r = cam_ratio[np.isfinite(cam_ratio)]
+    # calibrate resting / clicking hand shape from this recording
     rest_r = ratio[visible & (cue == REST) & ~zone]
     fist_r = ratio[visible & (cue == FIST)]
     if len(rest_r) < 50 or len(fist_r) < 50:
         return labels, ["camera: hand not visible enough during the recording - using the cue timing only"]
-    open_lvl, fist_lvl = np.median(rest_r), np.percentile(fist_r, 25)
-    if open_lvl - fist_lvl < C.VISION_MIN_GAP:
-        return labels, [f"camera: open hand ({open_lvl:.2f}) and fist ({fist_lvl:.2f}) look too similar "
+    rest_lvl, fist_lvl = np.median(rest_r), np.percentile(fist_r, 75)
+    shown = f"{m['rest']} {sign * rest_lvl:.2f}, {m['active']} {sign * fist_lvl:.2f}"
+    if fist_lvl - rest_lvl < min_gap:
+        return labels, [f"camera: {m['rest']} and {m['active']} look too similar ({shown}) "
                         "- using the cue timing only. Is the hand clearly in view?"]
 
-    # closed/open per camera frame, then per EMG sample
-    amount = (open_lvl - cam_ratio) / (open_lvl - fist_lvl)  # 0 = open, 1 = fist
+    # clicking or not per camera frame, then per EMG sample
+    amount = (cam_ratio - rest_lvl) / (fist_lvl - rest_lvl)  # 0 = resting, 1 = clicking
     states = _hysteresis(amount, on=C.VISION_ON, off=C.VISION_OFF)
     st = np.array([np.nan if s is None else float(s) for s in states])
     closed = np.where(fresh, st[np.clip(k, 0, None)], np.nan)
@@ -142,34 +170,50 @@ def vision_labels(emg_t, cue, seg, cam_t, cam_ratio, lag=None, margin=None, earl
     labels[stray & (cue != IGNORE)] = IGNORE
     n_stray = int(np.sum(np.diff(np.concatenate([[0], (~zone & closed).astype(int)])) == 1))
 
-    rep = [f"camera: hand visible {visible.mean() * 100:.0f}% of the time "
-           f"(open {open_lvl:.2f}, fist {fist_lvl:.2f})"]
+    word = "fist" if click == "fist" else "index lift"
+    rep = [f"camera: hand visible {visible.mean() * 100:.0f}% of the time ({shown})"]
     if delays:
-        rep.append(f"camera: {len(delays)}/{len(zones)} fists timed by the camera - you closed "
+        rep.append(f"camera: {len(delays)}/{len(zones)} {word}s timed by the camera - you did it "
                    f"{np.median(delays):.0f} ms after the cue (median), held {np.median(holds):.0f} ms")
     if missed:
-        rep.append(f"camera: {missed} cued fists never looked closed - left out of training")
+        rep.append(f"camera: {missed} cued {word}s never showed on camera - left out of training")
     if blind:
-        rep.append(f"camera: {blind} cued fists out of view - using the cue timing for them")
+        rep.append(f"camera: {blind} cued {word}s out of view - using the cue timing for them")
     if n_stray:
-        rep.append(f"camera: {n_stray} fist-like moments during relax phases - left out of training")
+        rep.append(f"camera: {n_stray} {word}-like moments during relax phases - left out of training")
     changed = np.mean(labels != cue) * 100
     rep.append(f"camera: changed {changed:.0f}% of the labels "
-               f"({int((labels == FIST).sum())} fist samples, cue had {int((cue == FIST).sum())})")
+               f"({int((labels == FIST).sum())} {word} samples, cue had {int((cue == FIST).sum())})")
     return labels, rep
 
 
 # --------------------------------------------------------------------------- camera
 
-def pick_camera_index() -> int:
-    """Built-in camera by name if cv2-enumerate-cameras is installed (indices shift when an
-    iPhone shows up as Continuity Camera), else 0."""
+def list_cameras():
+    """[(index, name)] of the connected cameras (needs cv2-enumerate-cameras), else []."""
     try:
         import cv2
         from cv2_enumerate_cameras import enumerate_cameras
-        cams = [(c.index, c.name) for c in enumerate_cameras(cv2.CAP_AVFOUNDATION)]
+        return [(c.index, c.name) for c in enumerate_cameras(cv2.CAP_AVFOUNDATION)]
     except Exception:
-        return 0
+        return []
+
+
+def pick_camera_index(want=None) -> int:
+    """Which camera to open. `want` (or config VISION_CAMERA if None): a number = that index,
+    text = first camera whose name contains it (e.g. "web camera"), empty = built-in camera.
+    Picking by name matters: indices shift when an iPhone shows up as Continuity Camera."""
+    want = C.VISION_CAMERA if want is None else want
+    want = str(want).strip()
+    if want.isdigit():
+        return int(want)
+    cams = list_cameras()
+    if want:
+        for idx, name in cams:
+            if want.lower() in name.lower():
+                return idx
+        names = ", ".join(f"{i}: {n}" for i, n in cams) or "none found"
+        raise SystemExit(f"no camera matching '{want}' (cameras: {names})")
     for idx, name in cams:
         if "facetime" in name.lower() or "built-in" in name.lower():
             return idx
@@ -180,19 +224,22 @@ def pick_camera_index() -> int:
 
 
 class HandCamera:
-    """Background thread: webcam -> MediaPipe -> closure ratio of the `side` hand per frame.
+    """Background thread: webcam -> MediaPipe -> click measure (METRIC[click]) of the `side` hand per frame.
 
     show() must be called from the main thread (macOS only allows windows there).
     """
 
-    def __init__(self, side, t_ref, index=None, swap_hands=False, preview=True):
+    def __init__(self, side, t_ref, index=None, swap_hands=False, preview=True, click="fist"):
         try:
             import cv2  # noqa: F401
             import mediapipe  # noqa: F401
         except ImportError:
             raise SystemExit("camera needs: pip install mediapipe opencv-python   (or use --no-camera)")
         self.side, self.t_ref = side, t_ref
-        self.index = pick_camera_index() if index is None else index
+        self.click, self.metric = click, METRIC[click]["fn"]
+        self.index = pick_camera_index(index)
+        cams = dict(list_cameras())
+        print(f"camera {self.index}: {cams.get(self.index, '?')}  (other: python -m myomouse.record --list-cameras)")
         self.swap, self.preview = swap_hands, preview
         self.times, self.ratios = [], []
         self.last = None            # (frame, landmarks or None, ratio, hands_seen)
@@ -256,7 +303,7 @@ class HandCamera:
                     seen.append(name)
                     if name == self.side and lms is None and res.hand_world_landmarks:
                         w = res.hand_world_landmarks[i]
-                        ratio = closure_ratio([(p.x, p.y, p.z) for p in w])
+                        ratio = self.metric([(p.x, p.y, p.z) for p in w])
                         lms = hand_lms
                 self.times.append(t)
                 self.ratios.append(ratio)
@@ -272,6 +319,8 @@ class HandCamera:
         r = self.last[2]
         if np.isnan(r):
             return f"cam: no {self.side} hand"
+        if self.click == "index":
+            return f"cam: index {'up  ' if r > 0.35 else 'down'} {np.degrees(r):3.0f} deg"
         return f"cam: {'closed' if r < 1.45 else 'open  '} {r:4.2f}"
 
     def show(self, ui=None, wait_ms=1):
@@ -313,10 +362,14 @@ class HandCamera:
             for pt in pts:
                 cv2.circle(img, pt, 4, white, -1, cv2.LINE_AA)
             shade(0, h - 50, w, h)
-            closed = np.clip(2.0 - ratio, 0, 1)  # rough, just for watching
+            # rough, just for watching
+            if self.click == "index":
+                closed, what = np.clip(ratio / 0.8, 0, 1), f"index lifted {np.degrees(ratio):.0f} deg"
+            else:
+                closed, what = np.clip(2.0 - ratio, 0, 1), f"hand closed {ratio:.2f}"
             cv2.rectangle(img, (15, h - 35), (15 + int(250 * closed), h - 15), (60, 60, 230), -1)
             cv2.rectangle(img, (15, h - 35), (265, h - 15), white, 1)
-            cv2.putText(img, f"hand closed {ratio:.2f}", (280, h - 18), font, 0.6, white, 1, cv2.LINE_AA)
+            cv2.putText(img, what, (280, h - 18), font, 0.6, white, 1, cv2.LINE_AA)
         else:
             shade(0, h - 50, w, h, (0, 0, 120), 0.7)
             msg = f"{self.side.upper()} hand not found" + (f"  (seeing: {', '.join(seen)})" if seen else "")

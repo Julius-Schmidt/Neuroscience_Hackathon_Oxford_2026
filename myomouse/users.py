@@ -1,7 +1,8 @@
 """Per-user storage: every recording and model belongs to one user.
 
-    data/<user>/<side>_<timestamp>.npz     recordings   (myomouse.record)
-    models/<user>/fist_<side>.joblib       LDA models   (myomouse.train)
+    data/<user>/<side>_<timestamp>.npz         fist recordings    (myomouse.record --click fist)
+    data/<user>/index_<side>_<timestamp>.npz   index recordings   (myomouse.record --click index)
+    models/<user>/<click>_<side>.joblib        LDA models         (myomouse.train)
 """
 
 import re

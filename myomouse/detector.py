@@ -1,4 +1,7 @@
-"""Streaming fist detector: ring buffer -> features -> model -> debounced press/release."""
+"""Streaming click detector: ring buffer -> features -> model -> debounced press/release.
+
+Works the same for both click gestures (fist / index lift); only the trained model differs.
+"""
 
 import math
 from pathlib import Path
@@ -11,14 +14,14 @@ from .features import envelope, window_features
 from .users import model_dir
 
 
-def model_path(user: str, side: str) -> Path:
-    return model_dir(user) / f"fist_{side}.joblib"
+def model_path(user: str, side: str, click: str = "fist") -> Path:
+    return model_dir(user) / f"{click}_{side}.joblib"
 
 
-def load_model(user: str, side: str) -> dict:
-    p = model_path(user, side)
+def load_model(user: str, side: str, click: str = "fist") -> dict:
+    p = model_path(user, side, click)
     if not p.exists():
-        raise FileNotFoundError(f"No model for {user}'s {side} arm at {p}. Run record + train first.")
+        raise FileNotFoundError(f"No {click} model for {user}'s {side} arm at {p}. Run record + train first.")
     return joblib.load(p)
 
 
@@ -45,7 +48,7 @@ class Debouncer:
 
 
 class FistDetector:
-    """Feed raw EMG samples one at a time; get press/release events back."""
+    """Feed raw EMG samples one at a time; get press/release events back (fist or index model)."""
 
     def __init__(self, model: dict, mode: str = "lda"):
         if mode not in ("lda", "threshold"):

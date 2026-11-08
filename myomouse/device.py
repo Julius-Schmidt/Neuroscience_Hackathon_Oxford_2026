@@ -3,7 +3,8 @@
 Each band object runs its own asyncio loop in a background thread and calls the
 registered handlers from there:
     emg handler: (sample: tuple of 8 ints)            at 200 Hz
-    imu handler: (quat: (w, x, y, z) int16 tuple)     at 50 Hz
+    imu handler: (quat, accel, gyro) int16 tuples     at 50 Hz
+                 quat (w, x, y, z) / 16384, accel (x, y, z) / 2048 = g, gyro (x, y, z) / 16 = deg/s
 """
 
 import asyncio
@@ -102,7 +103,7 @@ class BleBand:
     def _on_imu(self, _char, data: bytearray):
         vals = struct.unpack("<10h", data[:20])
         for h in self.imu_handlers:
-            h(vals[:4])
+            h(vals[:4], vals[4:7], vals[7:10])
 
     async def _main(self):
         from bleak import BleakClient, BleakScanner
@@ -200,10 +201,14 @@ class FakeBand:
             for h in self.emg_handlers:
                 h(emg)
             if n % 4 == 0:
-                yaw = 0.3 * math.sin(2 * math.pi * t / 6.0)
+                # forearm flat, turning left/right; band x-axis is forward, gravity on z
+                w_t = 2 * math.pi * t / 6.0
+                yaw = 0.3 * math.sin(w_t)
                 q = (math.cos(yaw / 2) * 16384, 0, 0, math.sin(yaw / 2) * 16384)
+                acc = (0, 0, 2048)  # gravity only (yaw doesn't change it)
+                gyro = (0, 0, int(0.3 * math.cos(w_t) * 2 * math.pi / 6.0 * 180 / math.pi * 16))
                 for h in self.imu_handlers:
-                    h(q)
+                    h(q, acc, gyro)
             n += 1
 
     def start(self, timeout=None):
