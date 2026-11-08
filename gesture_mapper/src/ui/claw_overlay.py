@@ -30,9 +30,10 @@ class ClawState:
         press 5  fixes y and clicks
     (refine off: 3 presses, as before.)
 
-    Drive mode (two switches, e.g. left fist / right fist): HOLD one to glide the crosshair
-    along x, the other along y - slow at first, faster the longer you hold, bouncing at the
-    edges; let go to stop. A quick TAP of either clicks where the crosshair is.
+    Drive mode (two switches, e.g. left fist / right fist): the lines start at the left / top
+    edge. HOLD one to glide along x, the other along y - slow at first, faster the longer you
+    hold; past the far edge a line wraps back round to the start. Let go to stop. A quick TAP
+    of either clicks where the lines cross, and the overlay goes away.
     """
     IDLE, X, XF, Y, YF, DRIVE = "idle", "x", "x-fine", "y", "y-fine", "drive"
 
@@ -59,11 +60,7 @@ class ClawState:
             held = now - self.held_since
             v = self.v0 + (self.vmax - self.v0) * min(1.0, max(0.0, held - 0.15) / self.ramp_s)
             ax = self.driving
-            val = (self.cx if ax == "x" else self.cy) + self.drive_dir[ax] * v * dt
-            if val >= 1.0:
-                val, self.drive_dir[ax] = 2.0 - val, -1
-            elif val <= 0.0:
-                val, self.drive_dir[ax] = -val, 1
+            val = ((self.cx if ax == "x" else self.cy) + v * dt) % 1.0   # wrap back to the start
             if ax == "x":
                 self.cx = val
             else:
@@ -124,6 +121,7 @@ class ClawState:
         """Returns (fx, fy) when a quick tap means 'click here', else None."""
         if self.stage != self.DRIVE:
             self.stage = self.DRIVE
+            self.cx, self.cy = 0.0, 0.0       # lines start at the left / top edge
         if down:
             self.driving, self.held_since = axis, now
             self._start = (self.cx, self.cy)
@@ -133,6 +131,7 @@ class ClawState:
         self.driving = None
         if now - self.held_since < self.tap_s:     # a tap, not a glide: undo the nudge, click
             self.cx, self.cy = self._start
+            self.stage = self.IDLE                  # done: the overlay fades out after the click
             return self.cx, self.cy
         return None
 

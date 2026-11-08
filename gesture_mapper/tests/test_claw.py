@@ -59,7 +59,6 @@ check(done is not None, f"5 presses with refine -> click ({done})")
 
 # drive mode: hold glides (slow then faster), tap clicks without moving
 s = ClawState()
-s.cx = 0.0
 s.drive("x", True, 0.0)
 for k in range(25):
     s.tick(0.02 * (k + 1), 0.02)
@@ -70,7 +69,14 @@ late = s.cx - early                            # distance in the next 0.5 s
 check(s.drive("x", False, 3.0) is None and late > 2 * early > 0, f"holding glides and speeds up ({early:.3f} then {late:.3f})")
 cx = s.cx
 s.drive("y", True, 4.0); s.tick(4.1, 0.1)
-check(s.drive("y", False, 4.15) == (cx, 0.5), "a quick tap clicks where the crosshair is")
+check(s.drive("y", False, 4.15) == (cx, 0.0) and s.stage == "idle",
+      "a quick tap clicks where the crosshair is, then the claw is done")
+s = ClawState()
+s.drive("x", True, 0.0)
+check(s.cx == 0.0 and s.cy == 0.0, "glide lines start at the left / top edge")
+for k in range(400):
+    s.tick(0.02 * (k + 1), 0.02)
+check(0.0 <= s.cx < 1.0, f"past the far edge the line wraps back to the start ({s.cx:.2f})")
 
 import rules as R
 import presets
