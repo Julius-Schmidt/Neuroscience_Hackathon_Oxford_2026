@@ -38,6 +38,24 @@ BOLD, RED, GREEN, DIM, RESET = "\033[1m", "\033[41;97m", "\033[32m", "\033[2m", 
 CLEAR_LINE = "\r\033[K"
 
 
+def long_holds(click=DEFAULT_CLICK):
+    """Extra blocks for --long: sustained holds at a steady, medium effort."""
+    word = "lift and HOLD the index" if click == "index" else "HOLD a steady fist"
+
+    def holds(n, active, relax, cue_on, cue_off):
+        steps = [(REST, 2.0, cue_off)]
+        for _ in range(n):
+            steps += [(FIST, active, cue_on), (REST, relax, cue_off)]
+        return steps
+    return [
+        ("Long holds", f"Arm still. When red, {word} at a medium effort (not your hardest)\n"
+                       "  for the whole 4 s - the way you'd hold it to keep something moving.",
+         holds(5, 4.0, 2.5, "HOLD steady", "relax")),
+        ("Long holds while moving", f"Move your arm gently the whole time. When red, {word} for 4 s.",
+         holds(4, 4.0, 2.5, "HOLD (keep moving)", "relax, keep moving")),
+    ]
+
+
 def protocol(side, click=DEFAULT_CLICK, move=C.MOVE):
     """List of blocks: (title, instructions, [(label, seconds, short cue), ...]).
 
@@ -173,6 +191,9 @@ def main():
     ap.add_argument("--fake", action="store_true", help="simulated band, for testing")
     ap.add_argument("--no-wait", action="store_true", help="don't wait for Enter between blocks")
     ap.add_argument("--no-camera", action="store_true", help="label by cue timing only, no webcam")
+    ap.add_argument("--long", action="store_true",
+                    help="add long, steady holds (4 s, still and while moving): for hold-to-glide / held keys, "
+                         "so a sustained squeeze doesn't flicker")
     ap.add_argument("--camera", "--camera-index", dest="camera", default=None,
                     help="webcam: number or part of its name, e.g. --camera 'web camera' "
                          "(default: VISION_CAMERA in config.py, built-in if empty)")
@@ -192,6 +213,8 @@ def main():
         return
 
     blocks = protocol(args.side, args.click, args.move)
+    if args.long:
+        blocks += long_holds(args.click)
     emg, labels, segs, times = [], [], [], []
     t_ref = time.perf_counter()  # shared clock for EMG and camera
     # what the EMG handler should label incoming samples with; None = not recording
