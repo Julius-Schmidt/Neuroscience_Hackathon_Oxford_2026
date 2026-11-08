@@ -75,10 +75,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("npz")
     ap.add_argument("--models", nargs="+", required=True, help="model folders, e.g. models/dylan models/dylan_aug")
+    ap.add_argument("--rotations", default="0,-1,1")
+    ap.add_argument("--levels", default=",".join(str(x) for x in LEVELS))
+    ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
-    rows = evaluate(a.npz, a.models)
+    rows = evaluate(a.npz, a.models, [float(x) for x in a.levels.split(",")],
+                    [int(x) for x in a.rotations.split(",")])
     print_table(rows)
-    out = Path(a.npz).with_name(Path(a.npz).name.replace("_raw.npz", "_robustness.json"))
+    out = Path(a.out) if a.out else Path(a.npz).with_name(Path(a.npz).name.replace("_raw.npz", "_robustness.json"))
     out.write_text(json.dumps(rows, indent=1))
     print(f"\nsaved {out}")
 
