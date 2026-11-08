@@ -93,6 +93,11 @@ def main():
     add_style_args(ap, move=False)
     ap.add_argument("--labels", choices=["camera", "cue"], default="camera",
                     help="camera-timed labels (default, where recorded) or plain cue timing")
+    ap.add_argument("--augment", action="store_true",
+                    help="also train on weaker (shrunk, real noise kept) and band-rotated copies "
+                         "of each recording: more robust to fatigue / weak users / re-wearing the band")
+    ap.add_argument("--save-as", default=None, metavar="USER",
+                    help="save the model under another user name (e.g. to compare with/without --augment)")
     args = ap.parse_args()
 
     sessions = load_sessions(args.user, args.side, args.labels, args.click)
@@ -103,6 +108,14 @@ def main():
         parts.append(windows(s, C.WINDOW, C.STEP))
         src = "camera labels" if s["camera"] and args.labels == "camera" else "cue labels"
         print(f"{s['file']}: {len(s['emg']) / C.EMG_HZ:.0f} s, {src}")
+    if args.augment:
+        from .augment import augmented_sessions
+        from .record import REST
+        for s in sessions:
+            extra = augmented_sessions(s, REST, seed=s["sid"])
+            for a in extra:   # same segment groups as the original: CV never splits a copy from its source
+                parts.append(windows(a, C.WINDOW, C.STEP))
+            print(f"  + {len(extra)} augmented copies of {s['file']} ({', '.join(a['aug'] for a in extra)})")
     X = np.concatenate([p[0] for p in parts])
     y = np.concatenate([p[1] for p in parts])
     groups = np.concatenate([p[2] for p in parts])
@@ -121,8 +134,9 @@ def main():
     threshold = {"center": float((rest_med + fist_med) / 2), "scale": float(max(fist_med - rest_med, 1e-3) / 6)}
 
     model = {"pipeline": pipe, "threshold": threshold, "window": C.WINDOW, "step": C.STEP, "side": args.side,
-             "user": args.user, "click": args.click, "trained_on": [s["file"] for s in sessions]}
-    out = model_path(args.user, args.side, args.click)
+             "user": args.user, "click": args.click, "trained_on": [s["file"] for s in sessions],
+             "augmented": bool(args.augment)}
+    out = model_path(args.save_as or args.user, args.side, args.click)
     out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, out)
     print(f"\nsaved {out}")
