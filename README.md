@@ -96,6 +96,38 @@ model, so it never mixes with the fist ones. Add `--move air` for the 3D pointin
   use `--check` (cursor only, Space/Enter click).
 - **No hardware:** `python -m myomouse.run --user julius --fake --dry-run` (needs trained models).
 
+## Arena, one-gesture modes and analysis tools (added Sun 8 Nov)
+
+**Arena** (`python -m myomouse.arena --user <you>`), keys while it runs:
+
+| key | does |
+|---|---|
+| `M` | control mode: band (the `--move` pointer) / relative / absolute (arm angle = cursor position) / joystick (tilt = cursor speed) |
+| `A` | which arm angles: yaw+pitch (air) / yaw+roll (table) / roll+pitch |
+| `K` | calibrate: 10 s sweeping your *comfortable* range; screen fits the shape you swept (lopsided is fine) |
+| `V` | angle map: what K recorded, the fitted region, where the screen corners sit, your arm now |
+| `P` | **claw** (point scanning, one gesture, no arm movement): a line sweeps across, fist stops it; a second sweeps down, fist clicks. `,` `.` sweep speed, `;` `'` reaction-time compensation |
+| arrows, `+` `-`, `[` `]` | x / y / both sensitivity, joystick dead zone |
+
+**Other one-gesture tools**
+- `python -m myomouse.sound_switch --user <you> --sound mypop`: every fist plays a sound, so an
+  iPhone's Switch Control (Sound switch) hears a switch press. `--test` plays it on Enter;
+  `--record NAME` records your own (needs `pip install sounddevice`). Your own recorded pop works far better than a synthetic one.
+- `python -m myomouse.onboard`: the Myo's **built-in** 5-pose classifier (no training). Do the
+  sync gesture (wrist bent back, hold until it vibrates). `--sound mypop` = phone switch on every fist.
+
+**Analysis** (offline, on a dev tool mode 4 fatigue recording in `data/devtool/sessions/`):
+- `python -m devtool.fatigue_features <id>_fatigue_raw.npz`: RMS, mean/median frequency, Dimitrov,
+  15-45 Hz share, zero crossings per squeeze, ranked by how well they track fatigue.
+- `python -m devtool.weakness_sim <id>_fatigue_raw.npz --models models/<you>`: replays the recording with
+  the muscle signal shrunk (real noise kept) to find where each click detector breaks.
+- `python -m devtool.tremor_sim <id>_fatigue_raw.npz --models models/<you>`: adds simulated 4-6 Hz
+  tremor and compares the debouncer hold time (`N_ON` in config.py; 3 = 30 ms, 20 = 200 ms "tremor mode").
+
+**Gesture mapper** (`gesture_mapper/`) now runs on Windows and has a **Blocks** page: a
+Scratch-style editor where any input (camera poses, Myo bands, EEG/BCI markers over LSL) drives any
+action. See [gesture_mapper/README.md](gesture_mapper/README.md#blocks-any-input--any-action).
+
 ## How it stays fast
 
 | Stage | Time |

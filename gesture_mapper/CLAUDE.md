@@ -1,6 +1,6 @@
 # Neuratect — Project Context
 
-Gesture-controlled command mapper. macOS-only MVP. CV in, OS actions out.
+Gesture-controlled command mapper. macOS + Windows. CV (and Myo / LSL via src/sources) in, OS actions out.
 
 ## Architecture (detail: notes/architecture.md)
 
@@ -36,4 +36,6 @@ Keep this file under ~350 tokens. A new item almost always belongs in a module C
 - Camera and Accessibility permissions are granted by hand (System Settings → Privacy &
   Security) and must be re-granted per machine. Both fail *silently* — no error, just
   nothing happens.
-- macOS only. No cross-platform abstraction until the MVP works end to end.
+- Windows goes through src/os-integration/quartz_compat.py (Quartz-shaped Win32). Keep new OS
+  calls Quartz-shaped or add them there, never call Win32 from other modules.
+- General mapping = src/mapping-engine/rules.py + src/sources/ + ui/page_blocks.py (data/rules.json).

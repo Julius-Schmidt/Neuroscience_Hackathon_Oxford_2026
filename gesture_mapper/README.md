@@ -1,9 +1,10 @@
 # Neuratect
 
-Gesture-controlled command mapper for macOS. A webcam watches your hands; hand poses and
-finger pinches become real keyboard and mouse input. Camera in, OS actions out.
+Gesture-controlled command mapper for macOS and Windows. A webcam watches your hands; hand poses and
+finger pinches become real keyboard and mouse input. Camera in, OS actions out - and, through the
+**Blocks** page, any other input too (Myo armbands, EEG/BCI markers).
 
-Status: working MVP, macOS only. Two contexts are built out — the desktop (the hand *is* the
+Status: working MVP. Built and tuned on macOS; Windows support added Sun 8 Nov (see below). Two contexts are built out — the desktop (the hand *is* the
 mouse) and Minecraft (movement, camera, clicks, hotbar, inventory).
 
 ## Requirements
@@ -17,6 +18,50 @@ pip install -r requirements.txt
 Versions there are pinned to what this actually runs on, so a second machine behaves the
 same. The MediaPipe model file `src/cv/hand_landmarker.task` is in the repo — no download
 step.
+
+## Windows
+
+```
+pip install -r requirements.txt      # the pyobjc (macOS) lines are skipped on Windows
+python gui.py
+```
+
+No Accessibility or camera grant step is needed on Windows (Settings > Privacy > Camera must
+allow desktop apps). How it works: the code calls macOS's Quartz API; on Windows those calls go to
+`src/os-integration/quartz_compat.py`, which does the same with Win32 (`SendInput`, `EnumWindows`).
+Differences worth knowing: Cmd+Space (Spotlight) opens Windows Start search; the "spotlight" context
+is the Start search; Minecraft is detected as `javaw`; mouse moves are absolute while the cursor
+is visible and relative (what games read) while it's hidden. Not yet tried on a Windows machine
+with the camera loop running live - first thing to check.
+
+## Blocks: any input -> any action
+
+The **Blocks** page (and `python rules_run.py` without the GUI) is the general mapping layer.
+A rule is a stack of blocks, Scratch-style:
+
+```
+[when  Myo band  right.fist  is held]          yellow: the event (any source)
+  [only if  mode is not  paused]               green: optional conditions
+  [hold mouse button  left]                    blue / orange / purple: actions, top to bottom
+```
+
+- **Inputs** (top bar): Myo built-in poses (fist, wave in/out, fingers spread, double tap, no training;
+  do the sync gesture), Myo trained click (`--user` model from myomouse), **BCI / EEG** (any LSL
+  marker stream: OpenViBE, BCI2000, PsychoPy, our decoders; needs `pip install pylsl`), camera poses.
+  Each Myo band also gives `<side>.pointer`, a continuous value for "move mouse with value".
+- **Actions:** keys (tap / hold), shortcuts, typing, mouse click / hold / move / scroll, open an app
+  or website, built-in commands, sounds, messages, and **modes** (set / toggle) so one gesture can
+  mean different things in different layers.
+- Click a palette block to add it to the selected rule (no dragging needed), or drag it. **Try**
+  fires a rule by hand; rules flash green when they fire for real.
+- **Examples:** one switch, two-band mouse, two-band game controller (left band = WASD, right band
+  = look + buttons), EEG/BCI markers.
+- Saved in `data/rules.json`. A new device = one small class in `src/sources/`; the rules don't change.
+
+```
+python rules_run.py --myo builtin --preset controller --dry-run   # watch events + what would fire
+python rules_run.py --lsl                                          # rules from data/rules.json on BCI markers
+```
 
 ## Permissions (do this first)
 
