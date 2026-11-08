@@ -75,6 +75,10 @@ check(len(R.load(path)["rules"]) == 12, "saved to rules.json")
 n = page.import_camera_mappings()
 n2 = page.import_camera_mappings()
 check(n > 0 and len(page.cards) == 12 + n2, f"import camera mappings twice -> added once ({n}, {len(page.cards)} cards)")
+titles = [h.title_text for h in page.headers]
+check(any("Minecraft" in t for t in titles) and any("Myo" in t for t in titles),
+      f"rules grouped by input and app ({titles})")
+check(all(not c.expanded for c in page.cards if c is not page.sel), "rules start collapsed to one line")
 page.shutdown()
 print("ALL PASS" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

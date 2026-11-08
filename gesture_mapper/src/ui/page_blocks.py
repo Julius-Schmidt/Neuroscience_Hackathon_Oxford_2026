@@ -316,6 +316,102 @@ class HatBlock(QFrame):
         self.changed.emit()
 
 
+# ── compact text for a rule (collapsed view) and grouping ───────────────────
+CONTEXT_LABELS = {"default": "Desktop", "spotlight": "Search / Spotlight", "minecraft": "Minecraft"}
+SOURCE_ORDER = ["myo", "lsl", "camera", "keyboard"]
+
+
+def _pretty(name: str) -> str:
+    return str(name).replace(".", " ").replace("_", " ")
+
+
+def _cmd_label(name) -> str:
+    try:
+        import labels
+        return labels.command_label(str(name))
+    except Exception:
+        return str(name)
+
+
+def action_text(a: dict) -> str:
+    t = a.get("type")
+    return {
+        "key_tap": lambda: f"press {a.get('key')}",
+        "key_hold": lambda: f"hold {a.get('key')}",
+        "shortcut": lambda: f"press {a.get('keys')}",
+        "type_text": lambda: f"type \u201c{a.get('text')}\u201d",
+        "mouse_click": lambda: f"{a.get('button')} click",
+        "mouse_hold": lambda: f"hold {a.get('button')} button",
+        "mouse_move": lambda: f"move mouse \u00d7{a.get('gain')}",
+        "scroll": lambda: f"scroll {a.get('amount')}",
+        "command": lambda: _cmd_label(a.get("name")),
+        "command_hold": lambda: f"hold {_cmd_label(a.get('name'))}",
+        "open": lambda: f"open {a.get('target')}",
+        "set_mode": lambda: f"mode \u2192 {a.get('value')}",
+        "toggle_mode": lambda: f"toggle mode {a.get('a')}/{a.get('b')}",
+        "wait": lambda: f"wait {a.get('seconds')} s",
+        "sound": lambda: f"sound {a.get('name')}",
+        "say": lambda: f"say \u201c{a.get('text')}\u201d",
+    }.get(t, lambda: str(t))()
+
+
+def rule_context(rule: dict):
+    return next((c.get("value") for c in rule.get("conditions", []) if c.get("type") == "context"), None)
+
+
+def group_key(rule: dict):
+    src = rule.get("when", {}).get("source", "myo")
+    return (src, rule_context(rule) if src == "camera" else None)
+
+
+def group_title(key) -> str:
+    src, ctx = key
+    base = {"myo": "Myo bands", "lsl": "BCI / EEG markers", "camera": "Camera poses",
+            "keyboard": "Test keys"}.get(src, src)
+    return f"{base}  \u00b7  {CONTEXT_LABELS.get(ctx, ctx)}" if ctx else (
+        f"{base}  \u00b7  any app" if src == "camera" else base)
+
+
+def group_sort(key):
+    src, ctx = key
+    order = ["default", "spotlight", "minecraft"]
+    return (SOURCE_ORDER.index(src) if src in SOURCE_ORDER else 9,
+            -1 if ctx is None else (order.index(ctx) if ctx in order else 5), str(ctx))
+
+
+def rule_summary(rule: dict, hide_context=True):
+    """(when text, do text) for the collapsed one-line view."""
+    w = rule.get("when", {})
+    when = f"{_pretty(w.get('name', ''))}  <span style='color:{theme.TEXT_FAINT}'>" \
+           f"{TRIGGER_SHORT.get(w.get('trigger', 'press'), '')}</span>"
+    conds = [c for c in rule.get("conditions", []) if not (hide_context and c.get("type") == "context")]
+    if conds:
+        when += "  <span style='color:%s'>if %s</span>" % (
+            C_COND, ", ".join(f"{R.CONDITIONS.get(c['type'], {}).get('label', c['type'])} {c.get('value')}"
+                              for c in conds))
+    acts = ", ".join(action_text(a) for a in rule.get("actions", [])) or \
+        f"<span style='color:{theme.TEXT_FAINT}'>nothing yet</span>"
+    return when, acts
+
+
+class GroupHeader(QPushButton):
+    def __init__(self, title: str, count: int, open_: bool):
+        super().__init__()
+        self.title_text, self.count = title, count
+        self.setCheckable(True)
+        self.setChecked(open_)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(f"QPushButton {{ background: transparent; border: none; text-align: left;"
+                           f" color: {theme.TEXT_DIM}; font-size: 13px; font-weight: 700; padding: 6px 2px; }}"
+                           f"QPushButton:hover {{ color: {theme.TEXT}; }}")
+        self.toggled.connect(lambda _: self._text())
+        self._text()
+
+    def _text(self):
+        arrow = "\u25be" if self.isChecked() else "\u25b8"
+        self.setText(f"{arrow}  {self.title_text}   ({self.count})")
+
+
 # ── one rule ─────────────────────────────────────────────────────────────────
 class RuleCard(QFrame):
     changed = Signal()
@@ -331,10 +427,11 @@ class RuleCard(QFrame):
         self._flash = 0
         self.setObjectName("rulecard")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 10, 12, 12)
-        lay.setSpacing(5)
+        lay.setContentsMargins(12, 6, 10, 6)
+        lay.setSpacing(4)
 
         head = QHBoxLayout()
+        head.setSpacing(8)
         self.enabled = QCheckBox()
         self.enabled.setChecked(rule.get("enabled", True))
         self.enabled.setToolTip("rule on / off")
@@ -344,6 +441,15 @@ class RuleCard(QFrame):
         self.title.setPlaceholderText("name this rule (optional)")
         self.title.textChanged.connect(lambda v: (self.rule.__setitem__("title", v), self.changed.emit()))
         head.addWidget(self.title, stretch=1)
+        self.summary = QLabel()
+        self.summary.setTextFormat(Qt.TextFormat.RichText)
+        self.summary.setStyleSheet(f"color: {theme.TEXT}; font-size: 13px;")
+        head.addWidget(self.summary, stretch=1)
+        self.edit_btn = QPushButton("Edit")
+        self.edit_btn.setProperty("class", "ghost")
+        self.edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.edit_btn.clicked.connect(lambda: self.set_expanded(not self.expanded))
+        head.addWidget(self.edit_btn)
         tr = QPushButton("▶ Try")
         tr.setToolTip("fire this rule's event now, as if the gesture happened")
         tr.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -356,9 +462,15 @@ class RuleCard(QFrame):
         head.addWidget(rm)
         lay.addLayout(head)
 
+        self.editor = QWidget()
+        ed = QVBoxLayout(self.editor)
+        ed.setContentsMargins(0, 2, 0, 0)
+        ed.setSpacing(5)
+        lay.addWidget(self.editor)
         self.hat = HatBlock(rule.setdefault("when", {"source": "myo", "name": "right.fist", "trigger": "press"}))
         self.hat.changed.connect(self.changed)
-        lay.addWidget(self.hat)
+        self.hat.changed.connect(self._refresh_summary)
+        ed.addWidget(self.hat)
         spine = QFrame()
         spine.setObjectName("spine")
         spine.setStyleSheet(f"QFrame#spine {{ border-left: 2px solid {_mix(theme.CARD_BORDER, C_EVENT, 0.5).name()}; "
@@ -366,12 +478,30 @@ class RuleCard(QFrame):
         self.body = QVBoxLayout(spine)
         self.body.setContentsMargins(10, 2, 0, 2)     # blocks hang under the hat, Scratch-style
         self.body.setSpacing(3)
-        lay.addWidget(spine)
+        ed.addWidget(spine)
         self.hint = make_label("drop or click blocks to add them here", "faint")
         self.hint.setContentsMargins(20, 2, 0, 0)
-        lay.addWidget(self.hint)
+        ed.addWidget(self.hint)
+        self.changed.connect(self._refresh_summary)
+        self.expanded = True
         self._rebuild()
         self._style()
+        self.set_expanded(False)
+
+    def set_expanded(self, on: bool):
+        self.expanded = on
+        self.editor.setVisible(on)
+        self.title.setVisible(on)
+        self.summary.setVisible(not on)
+        self.edit_btn.setText("Done" if on else "Edit")
+        self._refresh_summary()
+
+    def _refresh_summary(self):
+        when, acts = rule_summary(self.rule)
+        title = self.rule.get("title", "")
+        self.summary.setText(f"<b>{when}</b> &nbsp;<span style='color:{theme.TEXT_FAINT}'>\u2192</span>&nbsp; "
+                             f"<span style='color:{theme.TEXT}'>{acts}</span>")
+        self.summary.setToolTip(title)
 
     def _toggle(self, on):
         self.rule["enabled"] = on
@@ -416,6 +546,8 @@ class RuleCard(QFrame):
 
     def add_block(self, key: str) -> bool:
         cat, kind = key.split(":", 1)
+        if not self.expanded:
+            self.set_expanded(True)
         if cat == "cond":
             self.rule["conditions"].append(R.new_condition(kind))
         elif cat == "act":
@@ -619,6 +751,7 @@ class BlocksPage(QWidget):
         split.addWidget(pal_scroll)
 
         canvas_scroll = QScrollArea()
+        self.canvas_scroll = canvas_scroll
         canvas_scroll.setWidgetResizable(True)
         self.canvas = QWidget()
         self.canvas.setAcceptDrops(True)
@@ -626,7 +759,7 @@ class BlocksPage(QWidget):
         self.canvas.dropEvent = self._canvas_drop
         self.cl = QVBoxLayout(self.canvas)
         self.cl.setContentsMargins(0, 0, 8, 0)
-        self.cl.setSpacing(12)
+        self.cl.setSpacing(6)
         self.empty = make_label("No rules yet. Click a yellow  when …  block to start one, "
                                 "or pick an example at the top and press Load example.", "dim")
         self.empty.setWordWrap(True)
@@ -665,16 +798,39 @@ class BlocksPage(QWidget):
                 lambda ev: self.bridge.event.emit(f"{ev.source}:{ev.name} {ev.kind}") if ev.kind != "value" else None)
             self.runtime.start()
 
-    def _rebuild(self):
-        for c in self.cards:
-            c.setParent(None)
-            c.deleteLater()
-        self.cards = []
+    def _rebuild(self, expand_id=None):
+        for w in self.cards + getattr(self, "headers", []):
+            w.setParent(None)
+            w.deleteLater()
+        self.cards, self.headers = [], []
+        self._group_open = getattr(self, "_group_open", {})
         self.empty.setVisible(not self.data["rules"])
+        groups = {}
         for r in self.data["rules"]:
-            self._add_card(r)
+            groups.setdefault(group_key(r), []).append(r)
+        for key in sorted(groups, key=group_sort):
+            rules_ = groups[key]
+            open_ = self._group_open.get(key, True)
+            h = GroupHeader(group_title(key), len(rules_), open_)
+            h.toggled.connect(lambda on, k=key: self._toggle_group(k, on))
+            self.cl.insertWidget(self.cl.count() - 1, h)
+            self.headers.append(h)
+            for r in rules_:
+                c = self._add_card(r)
+                c.group = key
+                c.setVisible(open_)
+                if expand_id and r.get("id") == expand_id:
+                    c.set_expanded(True)
+                    self._select(c)
+                    self._group_open[key] = True
         if self.cards and self.sel not in self.cards:
-            self._select(self.cards[-1])
+            self.sel = None
+
+    def _toggle_group(self, key, on):
+        self._group_open[key] = on
+        for c in self.cards:
+            if getattr(c, "group", None) == key:
+                c.setVisible(on)
 
     def _add_card(self, rule):
         c = RuleCard(rule)
@@ -683,6 +839,8 @@ class BlocksPage(QWidget):
         c.selected.connect(self._select)
         c.delete.connect(self._delete)
         c.try_it.connect(self._try)
+        # a rule moved to another input belongs in another group
+        c.hat.src.currentIndexChanged.connect(lambda *_: QTimer.singleShot(0, self.regroup))
         self.cl.insertWidget(self.cl.count() - 1, c)
         self.cards.append(c)
         self.empty.setVisible(False)
@@ -696,6 +854,11 @@ class BlocksPage(QWidget):
     def _changed(self):
         self._save_timer.start()
 
+    def regroup(self):
+        """Call after edits that change a rule's source or app (it may belong in another group)."""
+        sel_id = self.sel.rule.get("id") if self.sel else None
+        self._rebuild(expand_id=sel_id)
+
     def save(self):
         self.data["mode"] = self.runtime.engine.mode if self.runtime else self.data.get("mode", "normal")
         R.save(self.data, self.rules_path)
@@ -705,10 +868,18 @@ class BlocksPage(QWidget):
         name = R.SOURCE_EVENTS.get(src, [""])[0]
         rule = R.new_rule(src, name, "press")
         self.data["rules"].append(rule)
-        card = self._add_card(rule)
-        self._select(card)
+        self._group_open[group_key(rule)] = True
+        self._rebuild(expand_id=rule["id"])
+        card = self.sel
         self._changed()
+        QTimer.singleShot(50, lambda: self._scroll_to(card))
         return card
+
+    def _scroll_to(self, card):
+        try:
+            self.canvas_scroll.ensureWidgetVisible(card, 0, 40)
+        except RuntimeError:
+            pass
 
     def _palette_click(self, key):
         if key.startswith("hat:") or self.sel is None:
@@ -726,9 +897,7 @@ class BlocksPage(QWidget):
         card.deleteLater()
         if self.sel is card:
             self.sel = None
-            if self.cards:
-                self._select(self.cards[-1])
-        self.empty.setVisible(not self.cards)
+        self._rebuild()
         self._changed()
 
     def _load_preset(self):
