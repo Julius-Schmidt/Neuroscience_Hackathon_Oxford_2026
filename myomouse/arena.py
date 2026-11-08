@@ -326,7 +326,7 @@ def main():
     w, h = (int(v) for v in args.size.split("x"))
     screen = pygame.display.set_mode((w, h), pygame.RESIZABLE)
     pygame.key.set_repeat(300, 60)       # hold an arrow key to keep changing sensitivity
-    show_map = [True]
+    show_map = [False]   # V to show; off by default so it never hides a target
     claw = Claw()
     if args.check:
         claw.lag = 0.0   # Space has no EMG delay to undo; compensating would make the line jump back
