@@ -77,6 +77,9 @@ ACTIONS = {
     "wait":        {"label": "wait (seconds)",      "params": {"seconds": 0.2}},
     "sound":       {"label": "play sound",          "params": {"name": "pop"}},
     "say":         {"label": "show message",        "params": {"text": "hi!"}},
+    "claw_step":   {"label": "claw: next step (sweep, stop, click)",
+                    "params": {"button": "left", "sweep_s": 3.0, "lag_ms": 80, "restart": False}},
+    "claw_cancel": {"label": "claw: cancel", "params": {}},
 }
 
 # event names each source can produce (the editor's dropdowns); free text is allowed too

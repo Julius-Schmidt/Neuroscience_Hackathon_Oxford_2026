@@ -51,7 +51,8 @@ PALETTE = [
                                ("act:shortcut", "press shortcut"), ("act:type_text", "type"),
                                ("act:mouse_click", "click mouse"), ("act:mouse_hold", "hold mouse button"),
                                ("act:mouse_move", "move mouse with value"), ("act:scroll", "scroll")]),
-    ("Control", C_CONTROL, [("act:set_mode", "set mode to"), ("act:toggle_mode", "toggle mode"),
+    ("Control", C_CONTROL, [("act:claw_step", "claw: next step"), ("act:claw_cancel", "claw: cancel"),
+                            ("act:set_mode", "set mode to"), ("act:toggle_mode", "toggle mode"),
                             ("act:wait", "wait")]),
     ("Apps & feedback", C_APP, [("act:open", "open app / website"), ("act:command", "built-in command"),
                                 ("act:command_hold", "hold built-in command"),
@@ -111,6 +112,7 @@ def _block_qss(color: str) -> str:
 class _Bridge(QObject):
     fired = Signal(str)
     event = Signal(str)
+    claw = Signal(dict)
 
 
 # ── one block ────────────────────────────────────────────────────────────────
@@ -254,6 +256,17 @@ class BlockWidget(QFrame):
         elif t == "sound":
             self._lbl(lay, "play sound")
             self._combo(lay, "name", ["pop", "mypop", "mypop_bass", "click", "ee"], editable=True, width=100)
+        elif t == "claw_step":
+            self._lbl(lay, "claw: next step, then")
+            self._combo(lay, "button", ["left", "right", "double"], width=80)
+            self._lbl(lay, "click · sweep")
+            self._num(lay, "sweep_s", 1.0, 10.0, 0.5)
+            self._lbl(lay, "s · reaction")
+            self._num(lay, "lag_ms", 0, 400, 10, decimals=0)
+            self._lbl(lay, "ms")
+            self._check(lay, "restart", "keep scanning")
+        elif t == "claw_cancel":
+            self._lbl(lay, "claw: cancel")
         elif t == "say":
             self._lbl(lay, "show message")
             self._line(lay, "text")
@@ -367,6 +380,8 @@ def action_text(a: dict) -> str:
         "wait": lambda: f"wait {a.get('seconds')} s",
         "sound": lambda: f"sound {a.get('name')}",
         "say": lambda: f"say \u201c{a.get('text')}\u201d",
+        "claw_step": lambda: f"claw step ({a.get('button')} click)",
+        "claw_cancel": lambda: "cancel claw",
     }.get(t, lambda: str(t))()
 
 
@@ -664,6 +679,8 @@ class BlocksPage(QWidget):
         self.bridge = _Bridge()
         self.bridge.fired.connect(self._on_fired)
         self.bridge.event.connect(self._on_event)
+        self.bridge.claw.connect(self._on_claw)
+        self._claw = None
         self._events = []
 
         # dark fields for the page's own dropdowns (the blocks style theirs themselves)
@@ -811,6 +828,9 @@ class BlocksPage(QWidget):
             self.runtime.engine.listeners.append(lambda rid, ev: self.bridge.fired.emit(rid))
             self.runtime.event_listeners.append(
                 lambda ev: self.bridge.event.emit(f"{ev.source}:{ev.name} {ev.kind}") if ev.kind != "value" else None)
+            hooks = getattr(self.runtime.engine.executor, "hooks", None)
+            if hooks is not None:
+                hooks["claw"] = self.bridge.claw.emit       # worker thread -> GUI thread
             self.runtime.start()
 
     def _rebuild(self, expand_id=None):
@@ -990,6 +1010,16 @@ class BlocksPage(QWidget):
                 self.runtime.remove_source(n)
             self.runtime.engine.release_all()
             self.status.setText("Stopped. Rules still fire from ▶ Try.")
+
+    def _on_claw(self, a: dict):
+        if self._claw is None:
+            from claw_overlay import ClawOverlay
+            import actions
+            self._claw = ClawOverlay(actions.click_at)
+        if a.get("type") == "claw_cancel":
+            self._claw.cancel()
+        else:
+            self._claw.step(a)
 
     def _on_fired(self, rid):
         for c in self.cards:

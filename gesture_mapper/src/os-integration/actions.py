@@ -123,6 +123,21 @@ def _open(target: str) -> None:
         subprocess.Popen(["xdg-open", target])
 
 
+def click_at(x: float, y: float, button: str = "left") -> None:
+    """Move the real cursor to screen pixel (x, y) and click there ('double' = two left clicks)."""
+    src = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
+    evt = Quartz.CGEventCreateMouseEvent(src, Quartz.kCGEventMouseMoved, Quartz.CGPoint(x, y),
+                                         Quartz.kCGMouseButtonLeft)
+    if hasattr(Quartz, "backend"):              # Windows / stub: always an absolute move here
+        Quartz.backend.move_abs(x, y)
+    else:
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
+    for _ in range(2 if button == "double" else 1):
+        b = "right" if button == "right" else "left"
+        _mouse(b, True)
+        _mouse(b, False)
+
+
 def _sound(name: str) -> None:
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = [os.path.join(here, "..", "..", "..", "data", "sounds", f"{name}.wav"),
@@ -143,6 +158,7 @@ class OSExecutor:
 
     def __init__(self):
         self.messages = []
+        self.hooks = {}          # UI-provided actions, e.g. "claw" (needs the GUI's overlay)
 
     @staticmethod
     def _cmd(a):
@@ -200,6 +216,12 @@ class OSExecutor:
             _open(str(a.get("target", "")))
         elif t == "sound":
             _sound(str(a.get("name", "pop")))
+        elif t in ("claw_step", "claw_cancel"):
+            hook = self.hooks.get("claw")
+            if hook is None:
+                log.info("[actions] the claw needs the GUI (python gui.py > Blocks)")
+            else:
+                hook(dict(a))
         elif t == "say":
             self.messages.append(str(a.get("text", "")))
             log.info(f"[rules] say: {a.get('text', '')}")

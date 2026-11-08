@@ -25,6 +25,15 @@ def one_switch():
     ]}
 
 
+def claw():
+    return {"mode": "normal", "rules": [
+        _r("myo", "right.fist", "press", [("claw_step", {})], (), "Fist = claw: start / stop / click"),
+        _r("myo", "right.double_tap", "press", [("claw_cancel", {})], (), "Double tap = cancel the claw"),
+        _r("lsl", "select", "press", [("claw_step", {})], (), "BCI 'select' also drives the claw"),
+        _r("keyboard", "f8", "press", [("claw_step", {})], (), "Test: Try this to step the claw by hand"),
+    ]}
+
+
 def two_band():
     return {"mode": "normal", "rules": [
         _r("myo", "right.pointer", "value", [("mouse_move", {"gain": 1.0})], [("not_mode", "paused")],
@@ -63,6 +72,6 @@ def bci():
     ]}
 
 
-PRESETS = {"one_switch": one_switch, "two_band": two_band, "controller": controller, "bci": bci}
-TITLES = {"one_switch": "One switch (1 band)", "two_band": "Two-band mouse",
+PRESETS = {"claw": claw, "one_switch": one_switch, "two_band": two_band, "controller": controller, "bci": bci}
+TITLES = {"claw": "Claw: click anywhere with one gesture", "one_switch": "One switch (1 band)", "two_band": "Two-band mouse",
           "controller": "Two-band game controller", "bci": "EEG / BCI markers"}
