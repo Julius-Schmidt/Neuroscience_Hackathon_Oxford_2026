@@ -15,6 +15,15 @@ Threading model:
   main thread      — held-key reconciliation, taps, context tracking (camera-rate is fine here)
 """
 
+import sys as _sys
+if _sys.platform == "win32":   # Windows consoles default to cp1252: print the log's arrows instead of crashing on them
+    for _s in (_sys.stdout, _sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 import sys
 import os
 import math

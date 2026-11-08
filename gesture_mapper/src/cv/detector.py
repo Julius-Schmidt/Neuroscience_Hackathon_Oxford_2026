@@ -68,7 +68,10 @@ class GestureDetector:
         if not self._cap.isOpened():
             raise RuntimeError(
                 f"Could not open camera {self._camera_index}. "
-                "Check System Settings → Privacy & Security → Camera."
+                + ("Is another program using it (Teams, Zoom, a myomouse record window)? Close it and retry. "
+                   "Also check Settings > Privacy & security > Camera > let desktop apps access your camera."
+                   if _sys.platform == "win32" else
+                   "Check System Settings → Privacy & Security → Camera.")
             )
         # 640x480 (was 320x240): at 320px wide, landmark quantization is ~1px
         # ≈ one inventory slot of cursor travel — GUI precision needs finer
