@@ -21,7 +21,7 @@ except Exception as e:      # Qt can't load here (no display libs)
     print(f"PASS skipped: {type(e).__name__}")
     sys.exit(0)
 
-s = ClawState(sweep_s=2.0, lag_s=0.2)
+s = ClawState(sweep_s=2.0, lag_s=0.2, refine=False)
 t = 0.0
 check(s.step(t) is None and s.stage == "x", "1st press starts the left-right sweep")
 t += 0.1
@@ -38,6 +38,39 @@ for _ in range(25):
     s.tick(t, 0.02)
 done = s.step(t)
 check(done is not None and s.stage == "idle" and 0 <= done[1] <= 1, f"3rd press clicks at ({done})")
+
+# refine pass: 5 presses, the fine sweep stays inside a narrow ribbon around the coarse stop
+s = ClawState(sweep_s=2.0, lag_s=0.0, refine=True, band=0.16)
+t = 10.0
+s.step(t)
+for _ in range(40):
+    t += 0.02; s.tick(t, 0.02)
+coarse = s.pos
+s.step(t)
+check(s.stage == "x-fine" and abs((s.lo + s.hi) / 2 - coarse) < 1e-6 and abs(s.hi - s.lo - 0.16) < 1e-6,
+      f"2nd press opens a ribbon around the coarse stop ({s.lo:.2f}-{s.hi:.2f})")
+inside = True
+for _ in range(400):
+    t += 0.02; s.tick(t, 0.02); inside &= s.lo - 1e-9 <= s.pos <= s.hi + 1e-9
+check(inside, "the slow line never leaves the ribbon")
+s.step(t + 1); s.step(t + 2)
+done = s.step(t + 3)
+check(done is not None, f"5 presses with refine -> click ({done})")
+
+# drive mode: hold glides (slow then faster), tap clicks without moving
+s = ClawState()
+s.cx = 0.0
+s.drive("x", True, 0.0)
+for k in range(25):
+    s.tick(0.02 * (k + 1), 0.02)
+early = s.cx                                   # distance in the first 0.5 s
+for k in range(25, 50):
+    s.tick(0.02 * (k + 1), 0.02)
+late = s.cx - early                            # distance in the next 0.5 s
+check(s.drive("x", False, 3.0) is None and late > 2 * early > 0, f"holding glides and speeds up ({early:.3f} then {late:.3f})")
+cx = s.cx
+s.drive("y", True, 4.0); s.tick(4.1, 0.1)
+check(s.drive("y", False, 4.15) == (cx, 0.5), "a quick tap clicks where the crosshair is")
 
 import rules as R
 import presets

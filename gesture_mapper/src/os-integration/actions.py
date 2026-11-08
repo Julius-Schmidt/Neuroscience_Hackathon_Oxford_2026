@@ -167,7 +167,11 @@ class OSExecutor:
         return executor, by_name(str(a.get("name", "")))
 
     def press(self, a: dict) -> None:
-        if a["type"] == "command_hold":
+        if a["type"] == "claw_drive":
+            hook = self.hooks.get("claw")
+            if hook:
+                hook(dict(a, down=True))
+        elif a["type"] == "command_hold":
             ex, cmd = self._cmd(a)
             if cmd:
                 (ex.hold if cmd.mode == "held" else ex.tap)(cmd)
@@ -177,7 +181,11 @@ class OSExecutor:
             _mouse(a.get("button", "left"), True)
 
     def release(self, a: dict) -> None:
-        if a["type"] == "command_hold":
+        if a["type"] == "claw_drive":
+            hook = self.hooks.get("claw")
+            if hook:
+                hook(dict(a, down=False))
+        elif a["type"] == "command_hold":
             ex, cmd = self._cmd(a)
             if cmd and cmd.mode == "held":
                 ex.release(cmd)

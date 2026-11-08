@@ -34,6 +34,16 @@ def claw():
     ]}
 
 
+def claw_drive():
+    return {"mode": "normal", "rules": [
+        _r("myo", "left.fist", "hold", [("claw_drive", {"axis": "x"})], (),
+           "Hold left fist = glide left-right (tap = click)"),
+        _r("myo", "right.fist", "hold", [("claw_drive", {"axis": "y"})], (),
+           "Hold right fist = glide up-down (tap = click)"),
+        _r("keyboard", "f8", "hold", [("claw_drive", {"axis": "x"})], (), "Test: Try = tap = click"),
+    ]}
+
+
 def two_band():
     return {"mode": "normal", "rules": [
         _r("myo", "right.pointer", "value", [("mouse_move", {"gain": 1.0})], [("not_mode", "paused")],
@@ -72,6 +82,7 @@ def bci():
     ]}
 
 
-PRESETS = {"claw": claw, "one_switch": one_switch, "two_band": two_band, "controller": controller, "bci": bci}
-TITLES = {"claw": "Claw: click anywhere with one gesture", "one_switch": "One switch (1 band)", "two_band": "Two-band mouse",
-          "controller": "Two-band game controller", "bci": "EEG / BCI markers"}
+PRESETS = {"claw": claw, "claw_drive": claw_drive, "one_switch": one_switch, "two_band": two_band, "controller": controller, "bci": bci}
+TITLES = {"claw": "Claw: click anywhere with one gesture",
+          "claw_drive": "Claw, two fists: hold to glide, tap to click", "one_switch": "One switch (1 band)", "two_band": "Two-band mouse",
+          "controller": "Two-band game controller", "bci": "EEG / BCI (LSL markers)"}

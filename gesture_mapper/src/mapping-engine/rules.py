@@ -78,7 +78,8 @@ ACTIONS = {
     "sound":       {"label": "play sound",          "params": {"name": "pop"}},
     "say":         {"label": "show message",        "params": {"text": "hi!"}},
     "claw_step":   {"label": "claw: next step (sweep, stop, click)",
-                    "params": {"button": "left", "sweep_s": 3.0, "lag_ms": 80, "restart": False}},
+                    "params": {"button": "left", "sweep_s": 3.0, "lag_ms": 80, "refine": True, "restart": False}},
+    "claw_drive":  {"label": "claw: glide while held (tap = click)", "params": {"axis": "x", "button": "left"}},
     "claw_cancel": {"label": "claw: cancel", "params": {}},
 }
 
@@ -228,7 +229,7 @@ class RuleEngine:
                 self.set_mode(str(a.get("value", "normal")))
             elif t == "toggle_mode":
                 self.set_mode(a.get("b") if self.mode == a.get("a") else a.get("a"))
-            elif t in ("key_hold", "mouse_hold", "command_hold"):
+            elif t in ("key_hold", "mouse_hold", "command_hold", "claw_drive"):
                 self._safe(self.executor.press, a)
                 if hold:
                     self._held.setdefault(ev.key, []).append(a)

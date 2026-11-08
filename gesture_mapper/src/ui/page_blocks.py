@@ -39,19 +39,20 @@ MIME = "application/x-neuratect-block"
 # category colours from the app's own (Apple dark-mode) palette
 C_EVENT, C_COND, C_INPUT, C_CONTROL, C_APP = theme.ORANGE, theme.GREEN, theme.ACCENT, theme.TEAL, theme.PURPLE
 
-SOURCE_LABELS = {"myo": "Myo band", "camera": "camera pose", "lsl": "BCI / EEG marker", "keyboard": "test key"}
+SOURCE_LABELS = {"myo": "Myo band", "camera": "camera pose", "lsl": "LSL marker", "keyboard": "test key"}
 TRIGGER_SHORT = {"press": "starts", "release": "ends", "hold": "is held", "value": "moves"}
 
 PALETTE = [
     ("Events", C_EVENT, [("hat:myo", "when Myo gesture"), ("hat:camera", "when camera pose"),
-                         ("hat:lsl", "when BCI / EEG marker"), ("hat:keyboard", "when test key")]),
+                         ("hat:lsl", "when LSL marker (EEG / BCI / apps)"), ("hat:keyboard", "when test key")]),
     ("Only if", C_COND, [("cond:mode", "only if mode is"), ("cond:not_mode", "only if mode is not"),
                          ("cond:context", "only if app in front is")]),
     ("Keys & mouse", C_INPUT, [("act:key_tap", "press key"), ("act:key_hold", "hold key"),
                                ("act:shortcut", "press shortcut"), ("act:type_text", "type"),
                                ("act:mouse_click", "click mouse"), ("act:mouse_hold", "hold mouse button"),
                                ("act:mouse_move", "move mouse with value"), ("act:scroll", "scroll")]),
-    ("Control", C_CONTROL, [("act:claw_step", "claw: next step"), ("act:claw_cancel", "claw: cancel"),
+    ("Control", C_CONTROL, [("act:claw_step", "claw: next step"), ("act:claw_drive", "claw: glide while held"),
+                            ("act:claw_cancel", "claw: cancel"),
                             ("act:set_mode", "set mode to"), ("act:toggle_mode", "toggle mode"),
                             ("act:wait", "wait")]),
     ("Apps & feedback", C_APP, [("act:open", "open app / website"), ("act:command", "built-in command"),
@@ -264,7 +265,14 @@ class BlockWidget(QFrame):
             self._lbl(lay, "s · reaction")
             self._num(lay, "lag_ms", 0, 400, 10, decimals=0)
             self._lbl(lay, "ms")
+            self._check(lay, "refine", "fine-tune pass")
             self._check(lay, "restart", "keep scanning")
+        elif t == "claw_drive":
+            self._lbl(lay, "claw: glide along")
+            self._combo(lay, "axis", ["x", "y"], width=60)
+            self._lbl(lay, "while held · tap =")
+            self._combo(lay, "button", ["left", "right", "double"], width=80)
+            self._lbl(lay, "click")
         elif t == "claw_cancel":
             self._lbl(lay, "claw: cancel")
         elif t == "say":
@@ -382,6 +390,7 @@ def action_text(a: dict) -> str:
         "say": lambda: f"say \u201c{a.get('text')}\u201d",
         "claw_step": lambda: f"claw step ({a.get('button')} click)",
         "claw_cancel": lambda: "cancel claw",
+        "claw_drive": lambda: f"glide {'left-right' if a.get('axis') == 'x' else 'up-down'} (tap = click)",
     }.get(t, lambda: str(t))()
 
 
@@ -396,7 +405,7 @@ def group_key(rule: dict):
 
 def group_title(key) -> str:
     src, ctx = key
-    base = {"myo": "Myo bands", "lsl": "BCI / EEG markers", "camera": "Camera poses",
+    base = {"myo": "Myo bands", "lsl": "LSL markers (EEG / BCI / other apps)", "camera": "Camera poses",
             "keyboard": "Test keys"}.get(src, src)
     return f"{base}  \u00b7  {CONTEXT_LABELS.get(ctx, ctx)}" if ctx else (
         f"{base}  \u00b7  any app" if src == "camera" else base)
@@ -721,7 +730,7 @@ class BlocksPage(QWidget):
         # sources + run bar
         bar = QHBoxLayout()
         bar.setSpacing(10)
-        bar.addWidget(make_label("Inputs:", "dim"))
+        bar.addWidget(make_label("Input sources:", "dim"))
         self.myo_mode = QComboBox()
         self.myo_mode.addItem("Myo off", "off")
         self.myo_mode.addItem("Myo: built-in poses (no training)", "builtin")
@@ -732,7 +741,9 @@ class BlocksPage(QWidget):
         self.user.setPlaceholderText("user (trained)")
         self.user.setMaximumWidth(120)
         bar.addWidget(self.user)
-        self.use_lsl = QCheckBox("BCI / EEG (LSL)")
+        self.use_lsl = QCheckBox("LSL markers")
+        self.use_lsl.setToolTip("Lab Streaming Layer marker streams: EEG / BCI decoders (OpenViBE, BCI2000, "
+                                "PsychoPy...) or any app that sends markers. Needs: pip install pylsl")
         bar.addWidget(self.use_lsl)
         self.use_cam = QCheckBox("Camera poses")
         bar.addWidget(self.use_cam)
@@ -1003,7 +1014,7 @@ class BlocksPage(QWidget):
                 det = getattr(self.engine, "detector", None)
                 self.runtime.add_source(CameraSource(det, own_pump=det is None))
             if not self.runtime.sources:
-                self.status.setText("No inputs chosen: pick Myo, BCI/EEG or camera first.")
+                self.status.setText("No input sources chosen: pick Myo, LSL markers or camera first.")
                 self.run_btn.setChecked(False)
         else:
             for n in list(self.runtime.sources):
@@ -1018,6 +1029,8 @@ class BlocksPage(QWidget):
             self._claw = ClawOverlay(actions.click_at)
         if a.get("type") == "claw_cancel":
             self._claw.cancel()
+        elif a.get("type") == "claw_drive":
+            self._claw.drive(a)
         else:
             self._claw.step(a)
 
