@@ -127,6 +127,8 @@ def main():
     ap.add_argument("--record", metavar="NAME", help="record your own sound as NAME")
     ap.add_argument("--min-gap", type=float, default=0.6,
                     help="ignore fists closer together than this (s): iOS needs a gap between switch presses")
+    from .run import add_tune_args
+    add_tune_args(ap)
     args = ap.parse_args()
 
     if args.record:
@@ -145,9 +147,10 @@ def main():
 
     require_user(ap, args)
     from .device import default_sides
-    from .run import start_bands
+    from .run import start_bands, tune_from_args
     sides = [s.strip() for s in (args.sides or default_sides(args.fake)).split(",") if s.strip()]
-    q, procs = start_bands(args.user, sides, args.mode, args.fake, False, False, args.click, C.MOVE, C.AXES)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, False, False, args.click, C.MOVE, C.AXES,
+                           tune_from_args(args))
     print(f"sound switch: every {args.click} on {', '.join(sides)} plays '{args.sound}'. Ctrl+C to stop.")
     last = 0.0
     n = 0

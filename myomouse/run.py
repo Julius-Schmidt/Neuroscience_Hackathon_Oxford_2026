@@ -18,6 +18,7 @@ Ctrl+C (or Esc in the window) to stop - always releases any held button.
 """
 
 import argparse
+import math
 import multiprocessing as mp
 import queue
 import threading
@@ -29,7 +30,7 @@ from .gestures import DEFAULT_CLICK, WORD, add_style_args
 from .users import add_user_arg, require_user
 
 
-def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, axes):
+def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, axes, tune=None):
     """Runs in its own process: reads one band, sends ('move'|'btn'|'p', ...) to the queue."""
     from collections import deque
 
@@ -40,7 +41,11 @@ def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, ax
     from .features import envelope
     from .pointer import AxisFilter, make_pointer, roll_angle, yaw_pitch
 
-    det = None if check else FistDetector(load_model(user, side, click), mode)
+    tune = tune or {}
+    det = None if check else FistDetector(load_model(user, side, click), mode,
+                                          hold_ms=tune.get("hold_ms"), rescale=tune.get("rescale", False))
+    gate = tune.get("motion_gate")           # deg/s; None = off
+    quiet_until = [0.0]                       # no new clicks until this time (arm was moving)
     recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
     band = open_band(side, fake=fake, seed=1 if side == "right" else 2)
     ptr = make_pointer(move) if pointer else None
@@ -49,6 +54,8 @@ def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, ax
 
     def on_emg(sample):
         if det is not None:
+            if gate:
+                det.blocked = time.perf_counter() < quiet_until[0]
             ev = det.push(sample)
             if ev:
                 q.put(("btn", side, ev, time.perf_counter()))
@@ -63,6 +70,10 @@ def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, ax
             q.put(("p", side, value, 0.0))
 
     def on_imu(quat, acc, gyro):
+        if gate and math.sqrt(sum(g * g for g in gyro)) / 16.0 > gate:   # raw gyro / 16 = deg/s
+            quiet_until[0] = time.perf_counter() + 0.3
+        if ptr is None:
+            return
         dx, dy = only(*ptr.update(quat, acc, gyro))
         if dx or dy:
             q.put(("move", dx, dy, time.perf_counter()))
@@ -71,7 +82,7 @@ def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, ax
         q.put(("ori", (yaw, pitch, roll_angle(quat)), None, time.perf_counter()))
 
     band.add_emg_handler(on_emg)
-    if ptr:
+    if ptr or gate:
         band.add_imu_handler(on_imu)
     try:
         band.start()
@@ -90,7 +101,23 @@ def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, ax
         band.stop()
 
 
-def start_bands(user, sides, mode, fake, show, check, click=DEFAULT_CLICK, move=C.MOVE, axes=C.AXES):
+def add_tune_args(ap):
+    """Per-user adaptations (see myomouse/adapt.py). All off by default."""
+    g = ap.add_argument_group("adaptations")
+    g.add_argument("--hold-ms", type=float, default=None,
+                   help="hold the fist this long before it clicks (tremor filter; e.g. 200). Default ~30 ms")
+    g.add_argument("--rescale", action="store_true",
+                   help="follow your current squeeze strength and rescale (weaker / tired squeezes)")
+    g.add_argument("--motion-gate", type=float, default=None, metavar="DEG_S",
+                   help="ignore new clicks while the forearm turns faster than this (e.g. 120)")
+
+
+def tune_from_args(args):
+    return dict(hold_ms=getattr(args, "hold_ms", None), rescale=getattr(args, "rescale", False),
+                motion_gate=getattr(args, "motion_gate", None))
+
+
+def start_bands(user, sides, mode, fake, show, check, click=DEFAULT_CLICK, move=C.MOVE, axes=C.AXES, tune=None):
     """Check bands.json / the user's models exist, then start one process per band. Returns (queue, procs)."""
     if not fake and not C.BANDS_FILE.exists():
         raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
@@ -112,7 +139,7 @@ def start_bands(user, sides, mode, fake, show, check, click=DEFAULT_CLICK, move=
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(user, s, mode, s == C.POINTER_SIDE, fake, q, show, check, click, move, axes))
+                         args=(user, s, mode, s == C.POINTER_SIDE, fake, q, show, check, click, move, axes, tune))
              for s in sides]
     for p in procs:
         p.start()
@@ -217,6 +244,7 @@ def main():
                     help="no classifier: show EMG rate + muscle activity and move the cursor (use before training)")
     ap.add_argument("--no-window", action="store_true", help="no playground window, terminal only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
+    add_tune_args(ap)
     args = ap.parse_args()
     if not args.check:
         require_user(ap, args)
@@ -229,7 +257,7 @@ def main():
     window = not args.no_window
     # the window shows the probability bars, so the bands always send them then
     q, procs = start_bands(args.user, sides, args.mode, args.fake, args.show or window, args.check,
-                           args.click, args.move, args.axes)
+                           args.click, args.move, args.axes, tune_from_args(args))
 
     ctrl = Controller(Mouse(args.dry_run), sides, print_probs=args.show and not window, click=args.click)
     t_start = time.perf_counter()

@@ -41,7 +41,7 @@ from collections import deque
 from . import config as C
 from .pointer import wrap
 from .gestures import WORD, add_style_args
-from .run import start_bands
+from .run import add_tune_args, start_bands, tune_from_args
 from .users import add_user_arg, require_user
 
 MODES = ["band", "relative", "absolute", "joystick"]
@@ -302,6 +302,7 @@ def main():
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--check", action="store_true", help="no classifier: cursor only, click with Space/Enter")
     ap.add_argument("--size", default="1280x800")
+    add_tune_args(ap)
     args = ap.parse_args()
     from .device import default_sides
     args.sides = args.sides or default_sides(args.fake)
@@ -311,7 +312,8 @@ def main():
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if C.POINTER_SIDE not in sides:
         print(f"note: the pointer band ({C.POINTER_SIDE}) isn't running, so the cursor won't move")
-    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check, args.click, args.move, args.axes)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check, args.click, args.move, args.axes,
+                           tune_from_args(args))
     word = WORD[args.click]
     table = args.move in ("table", "slide")
     gain_x = C.TABLE_GAIN_TURN if table else C.GAIN_X

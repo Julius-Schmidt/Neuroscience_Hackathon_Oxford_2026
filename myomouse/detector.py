@@ -50,16 +50,21 @@ class Debouncer:
 class FistDetector:
     """Feed raw EMG samples one at a time; get press/release events back (fist or index model)."""
 
-    def __init__(self, model: dict, mode: str = "lda"):
+    def __init__(self, model: dict, mode: str = "lda", hold_ms=None, rescale=False):
         if mode not in ("lda", "threshold"):
             raise ValueError(mode)
+        from .adapt import Rescaler, hold_to_n_on
         self.model, self.mode = model, mode
         self.window = model["window"]
         self.step = model["step"]
         self.buf = np.zeros((self.window, C.N_CHANNELS), dtype=np.int8)
         self.filled = 0
         self.since_last = 0
-        self.debounce = Debouncer()
+        n_on = hold_to_n_on(hold_ms, model["step"])
+        self.debounce = Debouncer(n_on=n_on) if n_on else Debouncer()
+        self.rescaler = Rescaler(model) if rescale and "threshold" in model else None
+        self.gain = 1.0
+        self.blocked = False      # set by the motion gate: no NEW presses while True
         self.last_p = 0.0
 
     def probability(self, win: np.ndarray) -> float:
@@ -79,5 +84,13 @@ class FistDetector:
         if self.filled < self.window or self.since_last < self.step:
             return None
         self.since_last = 0
-        self.last_p = self.probability(self.buf)
+        win = self.buf
+        if self.rescaler is not None:
+            self.gain = self.rescaler.feed(win)
+            if self.gain != 1.0:
+                win = np.clip(np.round(win.astype(np.float32) * self.gain), -128, 127).astype(np.int8)
+        self.last_p = self.probability(win)
+        if self.blocked and not self.debounce.pressed:
+            self.debounce.count = 0
+            return None
         return self.debounce.update(self.last_p)
