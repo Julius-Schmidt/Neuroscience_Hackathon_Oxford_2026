@@ -112,16 +112,8 @@ class MyoSource(Source):
                 while not self._stop.is_set():
                     while not events.empty():
                         kind, detail = events.get()
-                        if kind == "synced":
-                            self.synced[side] = True
-                            self.status = f"{side}: synced ({detail})"
+                        if self.on_classifier(side, edges, kind, detail):
                             await client.write_gatt_char(COMMAND_UUID, OB.CMD_UNLOCK_HOLD, response=True)
-                        elif kind == "unsynced":
-                            self.synced[side] = False
-                            edges.clear()
-                            self.status = f"{side}: unsynced - sync again"
-                        elif kind == "pose":
-                            edges.set(side, POSE_NAMES.get(detail))
                     await asyncio.sleep(0.02)
                 edges.clear()
                 try:
@@ -129,3 +121,18 @@ class MyoSource(Source):
                 except Exception:
                     pass
         asyncio.run(main())
+
+    def on_classifier(self, side, edges, kind, detail) -> bool:
+        """One classifier event from a band -> events. Returns True when the band needs
+        re-unlocking (just synced)."""
+        if kind == "synced":
+            self.synced[side] = True
+            self.status = f"{side}: synced ({detail})"
+            return True
+        if kind == "unsynced":
+            self.synced[side] = False
+            edges.clear()
+            self.status = f"{side}: unsynced - sync again"
+        elif kind == "pose":
+            edges.set(side, POSE_NAMES.get(detail))
+        return False
