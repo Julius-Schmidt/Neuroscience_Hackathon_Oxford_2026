@@ -86,7 +86,13 @@ class BleBand:
 
     def __init__(self, side: str, address: str | None = None):
         self.side = side
-        self.address = address or load_bands()[side]
+        if not address:
+            bands = load_bands()
+            if side not in bands:
+                raise SystemExit(f"No {side} band in bands.json (only: {', '.join(bands) or 'none'}). "
+                                 "Wear both bands and run `python -m myomouse.identify`.")
+            address = bands[side]
+        self.address = address
         self.emg_handlers, self.imu_handlers = [], []
         self._thread = None
         self._loop = None

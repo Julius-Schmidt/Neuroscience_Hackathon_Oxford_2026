@@ -735,10 +735,11 @@ class BlocksPage(QWidget):
         self.myo_mode.addItem("Myo off", "off")
         self.myo_mode.addItem("Myo: built-in poses (no training)", "builtin")
         self.myo_mode.addItem("Myo: trained click", "trained")
+        self.myo_mode.addItem("Myo: 5 trained gestures", "gestures")
         self.myo_mode.setStyleSheet(self._bar_qss)
         bar.addWidget(self.myo_mode)
         self.user = QLineEdit()
-        self.user.setPlaceholderText("user (trained)")
+        self.user.setPlaceholderText("user (trained / gestures)")
         self.user.setMaximumWidth(120)
         bar.addWidget(self.user)
         self.use_lsl = QCheckBox("LSL markers")
@@ -1001,11 +1002,12 @@ class BlocksPage(QWidget):
             if mode != "off":
                 from myo_source import MyoSource
                 user = self.user.text().strip() or None
-                if mode == "trained" and not user:
-                    self.status.setText("Trained mode needs your user name (the one you trained with).")
+                if mode in ("trained", "gestures") and not user:
+                    self.status.setText("Trained modes need your user name (the one you trained with).")
                     self.run_btn.setChecked(False)
                     return
-                self.runtime.add_source(MyoSource(mode, user))
+                self.runtime.add_source(MyoSource(mode, user, gesture_sides=self.data.get("gesture_sides"),
+                                                  move=self.data.get("move", "air")))
             if self.use_lsl.isChecked():
                 from lsl_source import LslSource
                 self.runtime.add_source(LslSource())

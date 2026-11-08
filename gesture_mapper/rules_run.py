@@ -2,6 +2,7 @@
 
     python rules_run.py --myo builtin                  # Myo built-in poses (sync gesture first), both bands
     python rules_run.py --myo trained --user dylan     # our trained click model
+    python rules_run.py --myo gestures --user julius --preset minecraft5   # 5 trained gestures
     python rules_run.py --lsl                          # EEG / BCI markers over LSL
     python rules_run.py --camera                       # webcam hand poses
     python rules_run.py --myo builtin --lsl --preset controller   # try a ready-made rule set
@@ -46,8 +47,13 @@ class PrintExecutor:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--myo", choices=["builtin", "trained"], default=None)
-    ap.add_argument("--user", default=None, help="for --myo trained")
+    ap.add_argument("--myo", choices=["builtin", "trained", "gestures"], default=None)
+    ap.add_argument("--user", default=None, help="for --myo trained / gestures")
+    ap.add_argument("--move", default=None, help="pointer style: table / air / slide / game (default: the preset's, else air; --myo gestures: config.MOVE)")
+    ap.add_argument("--gesture-sides", default=None,
+                    help="--myo gestures: which bands run the gesture model, e.g. left (default: the preset's "
+                         "choice, else every band with a model; the others give the fist click)")
+    ap.add_argument("--reject", type=float, default=None, help="--myo gestures: rejection threshold, stricter = higher (default 0.75)")
     ap.add_argument("--sides", default=None, help="e.g. right or right,left (default: bands.json)")
     ap.add_argument("--fake", action="store_true", help="simulated bands (trained mode)")
     ap.add_argument("--lsl", action="store_true")
@@ -76,7 +82,17 @@ def main():
     sides = args.sides.split(",") if args.sides else None
     if args.myo:
         from myo_source import MyoSource
-        rt.add_source(MyoSource(args.myo, args.user, sides, fake=args.fake))
+        if args.myo in ("trained", "gestures") and not args.user:
+            print(f"--myo {args.myo} needs --user <you>")
+            return
+        move = args.move or data.get("move") or "air"
+        if args.myo == "gestures" and not (args.move or data.get("move")):   # recorded forearm-on-table
+            from myomouse import config as MC
+            move = MC.MOVE
+        rt.add_source(MyoSource(args.myo, args.user, sides, move=move,
+                                fake=args.fake, **({"reject": args.reject} if args.reject is not None else {}),
+                                gesture_sides=(args.gesture_sides.split(",") if args.gesture_sides
+                                               else data.get("gesture_sides"))))
     if args.lsl:
         from lsl_source import LslSource
         rt.add_source(LslSource())
@@ -84,7 +100,7 @@ def main():
         from camera_source import CameraSource
         rt.add_source(CameraSource())
     if not rt.sources:
-        print("no sources: add --myo builtin / --myo trained --user <you> / --lsl / --camera")
+        print("no sources: add --myo builtin / --myo trained|gestures --user <you> / --lsl / --camera")
         return
     t0 = time.monotonic()
     last = {}

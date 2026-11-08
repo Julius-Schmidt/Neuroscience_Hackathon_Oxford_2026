@@ -38,6 +38,8 @@ class Source:
     def _guard(self, fn, *args):
         try:
             fn(*args)
+        except SystemExit as e:   # myomouse's "fix your setup" messages
+            self.status = f"error: {e}"
         except Exception as e:
             self.status = f"error: {type(e).__name__}: {e}"
 

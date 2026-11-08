@@ -56,6 +56,25 @@ TABLE_LEAK = 0.92          # speed decays by this per IMU sample (50 Hz), so dri
 TABLE_STILL_G = 0.03       # "arm is still" when acceleration stays below this ...
 TABLE_STILL_DPS = 6.0      # ... and rotation below this (deg/s) ...
 TABLE_STILL_N = 6          # ... for this many IMU samples (120 ms): speed is reset to 0
+# game (--move game, camera look in games). Two parts:
+#   aim:  small turns move the camera directly (raw, unfiltered)
+#   turn: past GAME_EDGE_* from the centre the camera keeps turning, gently at first, up to GAME_MAX_*
+# Overall sensitivity: Minecraft's own mouse sensitivity slider scales all of it.
+GAME_AIM_X = 1800.0        # pixels per radian of forearm turn, aiming (left/right). Lower = calmer
+GAME_AIM_Y = 4000.0        # same for up/down (TABLE_Y tilt; the band feels less of it, so higher)
+GAME_JITTER_X = 0.001      # ignore movement below this per IMU sample (rad, ~0.06 deg), left/right: kills the
+GAME_JITTER_Y = 0.0004     # small resting jitter; soft, so bigger movements pass with no jump and no lag
+GAME_FILTER = False        # jitter filter (One Euro) on the angles: off = raw (felt worse when on)
+GAME_FILTER_MIN_HZ = 1.0   # when on: lower = steadier when still, but laggier when slow
+GAME_FILTER_BETA = 3.0     # ... how fast it opens up for quick movements: higher = less lag when fast
+GAME_EDGE_X = 0.30         # radians (~17 deg) from the centre before the camera keeps turning
+GAME_EDGE_Y = 0.25         # same for up/down
+GAME_FULL_X = 0.35         # radians beyond the edge for full turning speed (speed ramps up smoothly)
+GAME_FULL_Y = 0.30
+GAME_MAX_X = 800.0         # full turning speed, pixels per second (left/right)
+GAME_MAX_Y = 400.0         # same for up/down
+GAME_RECENTER_S = 0.0      # > 0: inside the edge the centre slowly follows the arm, so band drift
+                           # doesn't creep you into turning (time constant, seconds; 0 = off)
 
 # --- Which cursor axes move (both styles; override with --axes) -----------------
 AXES = "both"              # "both" = free movement, "x" = left/right only, "y" = up/down only,
@@ -68,7 +87,7 @@ AXES_SMOOTH = 0.8          # dominant: how slowly the "which axis" decision foll
 BUTTON_FOR_SIDE = {"right": "left", "left": "right"}
 
 # --- Camera labels (record only; the live demo never uses the camera) ---------
-VISION_CAMERA = "web camera" # which webcam: "" = built-in, a number = that index, text = part of its name,
+VISION_CAMERA = ""           # which webcam: "" = built-in, a number = that index, text = part of its name,
                            # e.g. "web camera". Override with record --camera. List: record --list-cameras
 VISION_LAG_S = 0.05        # webcam frames arrive this much later than EMG (camera vs Bluetooth latency)
 VISION_MARGIN_S = 0.08     # leave out EMG this close to a visible open<->close switch

@@ -229,7 +229,7 @@ class HandCamera:
     show() must be called from the main thread (macOS only allows windows there).
     """
 
-    def __init__(self, side, t_ref, index=None, swap_hands=False, preview=True, click="fist"):
+    def __init__(self, side, t_ref, index=None, swap_hands=False, preview=True, click="fist", keep_points=False):
         try:
             import cv2  # noqa: F401
             import mediapipe  # noqa: F401
@@ -242,6 +242,9 @@ class HandCamera:
         print(f"camera {self.index}: {cams.get(self.index, '?')}  (other: python -m myomouse.record --list-cameras)")
         self.swap, self.preview = swap_hands, preview
         self.times, self.ratios = [], []
+        self.keep_points = keep_points
+        self.points = []            # with keep_points: (21, 3) world landmarks per frame, nan = no hand
+        self.last_points = None
         self.last = None            # (frame, landmarks or None, ratio, hands_seen)
         self.error = None
         self._stop = threading.Event()
@@ -294,6 +297,7 @@ class HandCamera:
                 img = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 res = landmarker.detect_for_video(img, ms)
                 ratio, lms, seen = np.nan, None, []
+                pts = np.full((21, 3), np.nan, dtype=np.float32)
                 for i, hand_lms in enumerate(res.hand_landmarks or []):
                     name = res.handedness[i][0].category_name.lower() if res.handedness else "?"
                     # on the mirrored frame MediaPipe names each hand the opposite way (tested
@@ -303,10 +307,14 @@ class HandCamera:
                     seen.append(name)
                     if name == self.side and lms is None and res.hand_world_landmarks:
                         w = res.hand_world_landmarks[i]
-                        ratio = self.metric([(p.x, p.y, p.z) for p in w])
+                        pts = np.array([(p.x, p.y, p.z) for p in w], dtype=np.float32)
+                        ratio = self.metric(pts)
                         lms = hand_lms
                 self.times.append(t)
                 self.ratios.append(ratio)
+                if self.keep_points:
+                    self.points.append(pts)
+                self.last_points = pts
                 self.last = (frame, lms, ratio, seen)
         finally:
             cap.release()
@@ -323,6 +331,12 @@ class HandCamera:
             return f"cam: index {'up  ' if r > 0.35 else 'down'} {np.degrees(r):3.0f} deg"
         return f"cam: {'closed' if r < 1.45 else 'open  '} {r:4.2f}"
 
+    def meter(self, ratio):
+        """(0..1 bar, text) for the bottom of the window. Rough, just for watching."""
+        if self.click == "index":
+            return np.clip(ratio / 0.8, 0, 1), f"index lifted {np.degrees(ratio):.0f} deg"
+        return np.clip(2.0 - ratio, 0, 1), f"hand closed {ratio:.2f}"
+
     def show(self, ui=None, wait_ms=1):
         """Draw the latest frame plus instructions (main thread only). Returns the key pressed, or -1.
 
@@ -332,6 +346,8 @@ class HandCamera:
             sub           - smaller line under the banner (countdowns)
             progress      - 0..1 bar under the banner
             footer        - hint at the bottom, e.g. "SPACE = start"
+            image         - picture (BGR array) shown bottom right, e.g. what the gesture looks like
+            image_label   - caption above that picture
         """
         if not self.preview or self.last is None:
             time.sleep(wait_ms / 1000)
@@ -362,11 +378,7 @@ class HandCamera:
             for pt in pts:
                 cv2.circle(img, pt, 4, white, -1, cv2.LINE_AA)
             shade(0, h - 50, w, h)
-            # rough, just for watching
-            if self.click == "index":
-                closed, what = np.clip(ratio / 0.8, 0, 1), f"index lifted {np.degrees(ratio):.0f} deg"
-            else:
-                closed, what = np.clip(2.0 - ratio, 0, 1), f"hand closed {ratio:.2f}"
+            closed, what = self.meter(ratio)
             cv2.rectangle(img, (15, h - 35), (15 + int(250 * closed), h - 15), (60, 60, 230), -1)
             cv2.rectangle(img, (15, h - 35), (265, h - 15), white, 1)
             cv2.putText(img, what, (280, h - 18), font, 0.6, white, 1, cv2.LINE_AA)
@@ -413,6 +425,25 @@ class HandCamera:
             if ui.get("progress") is not None:
                 pw = int((w - 80) * float(np.clip(ui["progress"], 0, 1)))
                 cv2.rectangle(img, (40, y0 + 120), (40 + pw, y0 + 126), white, -1)
+
+        # example picture, bottom right above the status bar
+        pic = ui.get("image")
+        if pic is not None:
+            top_free = panel_h + (130 if ui.get("cue") else 0) + 10
+            bottom = h - 60
+            pw = int(w * 0.4)
+            ph = int(pic.shape[0] * pw / pic.shape[1])
+            cap_h = 34 if ui.get("image_label") else 0
+            if ph + cap_h > bottom - top_free:  # tall picture: fit it into the free height
+                ph = max(40, bottom - top_free - cap_h)
+                pw = int(pic.shape[1] * ph / pic.shape[0])
+            x0, y1 = w - pw - 15, bottom
+            y0 = y1 - ph
+            img[y0:y1, x0:x0 + pw] = cv2.resize(pic, (pw, ph), interpolation=cv2.INTER_AREA)
+            cv2.rectangle(img, (x0 - 2, y0 - 2), (x0 + pw + 1, y1 + 1), white, 2)
+            if cap_h:
+                shade(x0 - 2, y0 - cap_h, x0 + pw + 2, y0 - 2, alpha=0.75)
+                cv2.putText(img, ui["image_label"], (x0 + 8, y0 - 10), font, 0.75, white, 2, cv2.LINE_AA)
 
         cv2.imshow("myomouse camera", img)
         return cv2.waitKey(wait_ms)

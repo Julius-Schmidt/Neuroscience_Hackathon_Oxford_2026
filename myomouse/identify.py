@@ -59,6 +59,13 @@ def main():
         if ans != "s":
             bands["left" if ans == "l" else "right"] = addr
 
+    # keep an arm that wasn't found this time (its band asleep / out of range), unless that
+    # band just got the other arm
+    old = json.loads(C.BANDS_FILE.read_text()) if C.BANDS_FILE.exists() else {}
+    for arm, addr in old.items():
+        if arm not in bands and addr not in bands.values():
+            bands[arm] = addr
+            print(f"  kept {arm} = {addr} from the old bands.json (not found this time)")
     C.BANDS_FILE.write_text(json.dumps(bands, indent=2))
     print(f"\nsaved {C.BANDS_FILE}: {bands}")
     missing = {"left", "right"} - bands.keys()

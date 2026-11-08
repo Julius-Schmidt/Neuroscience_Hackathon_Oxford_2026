@@ -75,8 +75,8 @@ model, so it never mixes with the fist ones. Add `--move air` for the 3D pointin
   `--no-camera` records the old way; `train --labels cue` trains without the camera labels,
   so you can compare the "caught X/Y ..., Z false clicks" lines. For the index, put the camera
   so it sees the hand from the side/front: a lifted finger is hard to see from straight above.
-  **Which camera:** `VISION_CAMERA` in [config.py](myomouse/config.py) (now `"web camera"`, the
-  external one; `""` = built-in). Override per run with `--camera "web camera"` or `--camera 0`;
+  **Which camera:** `VISION_CAMERA` in [config.py](myomouse/config.py) (now `""`, the MacBook's
+  built-in camera; `"web camera"` = the external one). Override per run with `--camera "web camera"` or `--camera 0`;
   `python -m myomouse.record --list-cameras` shows them all and which one is used.
   Settings: `VISION_*` in [config.py](myomouse/config.py).
 - **Playground (`run`):** the bands move the real mouse, and a window shows the cursor trail,
@@ -96,6 +96,7 @@ model, so it never mixes with the fist ones. Add `--move air` for the 3D pointin
   use `--check` (cursor only, Space/Enter click).
 - **No hardware:** `python -m myomouse.run --user julius --fake --dry-run` (needs trained models).
 
+<<<<<<< Updated upstream
 ## Arena, one-gesture modes and analysis tools (added Sun 8 Nov)
 
 **Arena** (`python -m myomouse.arena --user <you>`), keys while it runs:
@@ -127,6 +128,51 @@ model, so it never mixes with the fist ones. Add `--move air` for the 3D pointin
 **Gesture mapper** (`gesture_mapper/`) now runs on Windows and has a **Blocks** page: a
 Scratch-style editor where any input (camera poses, Myo bands, EEG/BCI markers over LSL) drives any
 action. See [gesture_mapper/README.md](gesture_mapper/README.md#blocks-any-input--any-action).
+=======
+## Gesture recognition: 5 gestures (separate from clicking)
+
+[myomouse/gestures11/](myomouse/gestures11/) recognises **ulnar deviation, wrist extension, power
+grip, chuck grip and pinch grip** from one band, plus neutral and **rest** (hand completely limp),
+which both mean "no gesture". It has its own recordings (`data/<user>/gestures_<side>_*.npz`) and
+model (`models/<user>/gestures_<side>.joblib`) and doesn't touch the fist / index click.
+
+Why these 5: we started with the 10 gestures from the EMG literature and tested every combination
+on a real recording. These 5 were the best-separated set on the Myo (live: ~85% of gesture time
+shown correctly, ~1% wrong gesture, ~2.6% false gestures while idle). Radial deviation, wrist
+flexion, supination, pronation and open hand were dropped: they were too often confused with
+neutral or with each other. Older recordings that contain them still load; those parts are skipped.
+
+```bash
+python -m myomouse.gestures11.record --user julius --side right   # rest + 10 reps (~5 min), --reps to change
+python -m myomouse.gestures11.train  --user julius --side right   # accuracy, confusion matrix, live false-gesture table
+python -m myomouse.gestures11.live   --user julius --side right   # live readout (--reject 0.9 = stricter)
+python -m myomouse.gestures11.pick   --user julius --side right   # test game: two gestures, do one, it's marked "Predicted"
+```
+
+- **Setup: forearm resting on the table** the whole time, camera low in front of the hand. Holding
+  the arm up for the camera keeps the forearm muscles working: in the first recording "neutral"
+  was louder than a fist, which drowned out the gestures.
+- **Camera labels** work like for the fist: the webcam watches your hand while you record, and
+  the labels follow when your hand actually moved into and out of each gesture (measured as how far
+  the 21 hand landmarks moved from your neutral pose). Repetitions that look like a different
+  gesture are left out. The camera window shows the cues with an example photo of each gesture
+  ([myomouse/gestures11/assets/](myomouse/gestures11/assets/)): the current one while you hold it, the next one
+  during the neutral pause. First hold your hand in neutral and
+  press SPACE. Same flags as `myomouse.record`: `--no-camera`, `--camera`, `--swap-hands`,
+  `--no-preview`, `--list-cameras`. `train --labels cue` trains without the camera labels to compare.
+- Record **2-3 times, taking the band off and on in between** (mark its position on your skin).
+  `train` then also reports "new session" accuracy, the number that matters for a demo.
+- `train --gestures power,chuck,ext` trains on a subset (neutral + rest always included), e.g. to
+  drop a pair the confusion matrix shows it mixes up. `train --model svm` tries an SVM instead of LDA.
+- Features: the same Hudgins set as the click, on 200 ms windows, a new decision every 25 ms.
+- **Biased towards neutral** ([decide.py](myomouse/gestures11/decide.py)): a gesture is only shown
+  if (1) the classifier is at least `REJECT` = 0.6 sure (confidence-based rejection) and (2) it
+  wins `N_ON` = 3 decisions in a row (75 ms); 2 neutral decisions (50 ms) are enough to drop back.
+  An optional rest gate (`train --rest-gate`) also hides anything as quiet as your recorded rest;
+  it's off by default because it hid quiet gestures like power grip. `train` prints how often a
+  gesture would show while you're idle vs. how many gestures it still catches, for several thresholds.
+  Tune in [gestures11/\_\_init\_\_.py](myomouse/gestures11/__init__.py) or with `train/live --reject`.
+>>>>>>> Stashed changes
 
 ## How it stays fast
 

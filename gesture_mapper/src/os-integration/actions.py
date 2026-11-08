@@ -55,13 +55,24 @@ def _mouse(button: str, down: bool) -> None:
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
 
 
+_carry = [0.0, 0.0]   # sub-pixel movement not sent yet
+
+
 def _move(dx: float, dy: float) -> None:
+    # games read the whole-pixel delta fields: keep the fractions, or slow aiming never arrives
+    _carry[0] += dx
+    _carry[1] += dy
+    ix, iy = int(round(_carry[0], 6)), int(round(_carry[1], 6))   # round: 10 x 0.3 is 2.9999...
+    if not ix and not iy:
+        return
+    _carry[0] -= ix
+    _carry[1] -= iy
     src = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
     cur = Quartz.CGEventGetLocation(Quartz.CGEventCreate(src))
     evt = Quartz.CGEventCreateMouseEvent(src, Quartz.kCGEventMouseMoved,
-                                         Quartz.CGPoint(cur.x + dx, cur.y + dy), Quartz.kCGMouseButtonLeft)
-    Quartz.CGEventSetIntegerValueField(evt, Quartz.kCGMouseEventDeltaX, int(dx))
-    Quartz.CGEventSetIntegerValueField(evt, Quartz.kCGMouseEventDeltaY, int(dy))
+                                         Quartz.CGPoint(cur.x + ix, cur.y + iy), Quartz.kCGMouseButtonLeft)
+    Quartz.CGEventSetIntegerValueField(evt, Quartz.kCGMouseEventDeltaX, ix)
+    Quartz.CGEventSetIntegerValueField(evt, Quartz.kCGMouseEventDeltaY, iy)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, evt)
 
 

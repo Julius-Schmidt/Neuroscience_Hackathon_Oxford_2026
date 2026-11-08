@@ -205,7 +205,11 @@ def main():
     if args.list_cameras:
         from .vision import list_cameras, pick_camera_index
         cams = list_cameras()
-        chosen = pick_camera_index(args.camera)
+        try:
+            chosen = pick_camera_index(args.camera)
+        except SystemExit as e:  # configured camera not plugged in: still list the others
+            chosen = None
+            print(e)
         for i, n in cams:
             print(f"  {i}: {n}{'   <- used' if i == chosen else ''}")
         if not cams:

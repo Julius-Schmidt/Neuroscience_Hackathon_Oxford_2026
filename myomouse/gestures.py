@@ -17,7 +17,7 @@ from . import config as C
 
 CLICKS = ("fist", "index")
 DEFAULT_CLICK = "fist"    # never "index": that one is experimental and opt-in via --click index
-MOVES = ("table", "air", "slide")
+MOVES = ("table", "air", "slide", "game")
 
 # words for messages / UI
 WORD = {"fist": "fist", "index": "index lift"}      # "caught 5/8 fists" / "index lifts"

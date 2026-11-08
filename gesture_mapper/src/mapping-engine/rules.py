@@ -89,7 +89,8 @@ SOURCE_EVENTS = {
                ("fist", "open_palm", "peace", "index_pointer", "thumbs_up", "shaaa",
                 "pinch_index", "pinch_middle", "pinch_ring", "pinch_pinky")],
     "myo": [f"{s}.{g}" for s in ("right", "left") for g in
-            ("fist", "index", "wave_in", "wave_out", "fingers_spread", "double_tap")]
+            ("fist", "index", "wave_in", "wave_out", "fingers_spread", "double_tap",
+             "ulnar_deviation", "wrist_extension", "power_grip", "chuck_grip", "pinch_grip")]
            + ["right.pointer", "left.pointer"],
     "lsl": ["any marker", "left", "right", "select", "target_1", "target_2"],
     "keyboard": ["f8", "f9", "f10"],

@@ -69,7 +69,7 @@ def wrap(a: float) -> float:
 
 
 def make_pointer(move: str):
-    kinds = {"air": Pointer, "table": TablePointer, "slide": SlidePointer}
+    kinds = {"air": Pointer, "table": TablePointer, "slide": SlidePointer, "game": GamePointer}
     if move not in kinds:
         raise ValueError(move)
     return kinds[move]()
@@ -155,6 +155,88 @@ class TablePointer:
         self.vx = a * self.vx + (1 - a) * dx
         self.vy = a * self.vy + (1 - a) * dy
         return self.vx, self.vy
+
+
+class OneEuro:
+    """One Euro filter (Casiez et al. 2012): heavy smoothing while the signal moves slowly (no
+    jitter), light while it moves fast (no lag). For one angle, in radians, at IMU_HZ."""
+
+    def __init__(self, min_hz, beta, d_hz=1.0, rate=IMU_HZ):
+        self.min_hz, self.beta, self.d_hz, self.dt = min_hz, beta, d_hz, 1.0 / rate
+        self.x = self.dx = None
+
+    def _alpha(self, hz):
+        tau = 1.0 / (2 * math.pi * hz)
+        return 1.0 / (1.0 + tau / self.dt)
+
+    def __call__(self, x):
+        if self.x is None:
+            self.x, self.dx = x, 0.0
+            return x
+        a = self._alpha(self.d_hz)
+        self.dx += a * ((x - self.x) / self.dt - self.dx)
+        a = self._alpha(self.min_hz + self.beta * abs(self.dx))
+        self.x += a * (x - self.x)
+        return self.x
+
+
+class GamePointer:
+    """Camera look for games, forearm on the table (yaw = left/right, TABLE_Y = up/down).
+
+    aim:  the angle change moves the camera directly (GAME_AIM_*), no smoothing; only per-sample
+          changes below GAME_JITTER_* are dropped (soft: no jump). GAME_FILTER = True adds a One Euro filter
+    turn: an arm only turns so far, a game camera has to go all the way round: past GAME_EDGE_*
+          from the centre it keeps turning, starting gently (quadratic ramp over GAME_FULL_*) up
+          to GAME_MAX_* px/s. Back inside = stop.
+    drift: optional (GAME_RECENTER_S > 0): inside the edge the centre slowly follows the arm,
+          so the band's slow yaw drift never moves the edge under you."""
+
+    def __init__(self):
+        self.filt = [OneEuro(C.GAME_FILTER_MIN_HZ, C.GAME_FILTER_BETA) for _ in range(2)]
+        self.raw = None          # last raw angles (to unwrap)
+        self.cont = None         # unwrapped angles
+        self.prev = None         # last filtered angles
+        self.origin = None
+
+    def angles(self, q):
+        yaw, pitch = yaw_pitch(q)
+        return yaw, (forearm_roll(q) if C.TABLE_Y == "roll" else pitch)
+
+    @staticmethod
+    def turn_speed(offset, edge, full, top):
+        """px/s for an offset (rad) from the centre: 0 inside the edge, then a smooth ramp up to top."""
+        excess = abs(offset) - edge
+        if excess <= 0:
+            return 0.0
+        return math.copysign(top * min(1.0, excess / full) ** 2, offset)
+
+    def update(self, q, acc=None, gyro=None):
+        raw = self.angles(q)
+        if self.raw is None:
+            self.raw, self.cont = raw, list(raw)
+        else:
+            self.cont = [c + wrap(r - p) for c, r, p in zip(self.cont, raw, self.raw)]
+            self.raw = raw
+        f = [flt(c) for flt, c in zip(self.filt, self.cont)] if C.GAME_FILTER else list(self.cont)
+        if self.prev is None:
+            self.prev, self.origin = f, list(f)
+            return 0.0, 0.0
+        da = soft_deadzone(f[0] - self.prev[0], C.GAME_JITTER_X)   # small jitter filter only
+        db = soft_deadzone(f[1] - self.prev[1], C.GAME_JITTER_Y)
+        self.prev = f
+        ox, oy = f[0] - self.origin[0], f[1] - self.origin[1]
+        sx = C.GAME_AIM_X * da + self.turn_speed(ox, C.GAME_EDGE_X, C.GAME_FULL_X, C.GAME_MAX_X) / IMU_HZ
+        sy = C.GAME_AIM_Y * db + self.turn_speed(oy, C.GAME_EDGE_Y, C.GAME_FULL_Y, C.GAME_MAX_Y) / IMU_HZ
+        if C.GAME_RECENTER_S > 0:
+            k = 1.0 / (C.GAME_RECENTER_S * IMU_HZ)
+            if abs(ox) < C.GAME_EDGE_X:
+                self.origin[0] += k * ox
+            if abs(oy) < C.GAME_EDGE_Y:
+                self.origin[1] += k * oy
+        # same directions as TablePointer: turn left = look left, tilt = look up
+        dx = -sx * (-1 if C.TABLE_INVERT_X else 1)
+        dy = -sy * (-1 if C.TABLE_INVERT_Y else 1)
+        return dx, dy
 
 
 class SlidePointer:

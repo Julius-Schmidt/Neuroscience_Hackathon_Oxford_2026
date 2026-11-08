@@ -5,8 +5,13 @@
   mode "builtin"  the band's own classifier, no training: 'myo:<side>.fist', '.wave_in',
                   '.wave_out', '.fingers_spread', '.double_tap'. Do the sync gesture once
                   (bend the wrist back and hold until it vibrates).
+  mode "gestures" our 5-gesture model (myomouse.gestures11) on every band that has one:
+                  'myo:<side>.ulnar_deviation', '.wrist_extension', '.power_grip',
+                  '.chuck_grip', '.pinch_grip'. Bands without a gesture model fall back to
+                  the trained click ('<side>.fist'), so one arm can do gestures, the other
+                  look + click. Needs `python -m myomouse.gestures11.train --user <you>`.
 
-Both also give arm pointing as a continuous value 'myo:<side>.pointer' = (dx, dy) pixels,
+All modes also give arm pointing as a continuous value 'myo:<side>.pointer' = (dx, dy) pixels,
 for 'move mouse' blocks - so two bands = two gesture sets + a pointer: a controller.
 """
 
@@ -21,6 +26,12 @@ from base import REPO_ROOT, EdgeTracker, Event, Source
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+# mode "gestures" is tuned for games, stricter than gestures11.live (measured on a recording:
+# a quarter of the wrong-gesture events, almost no dropouts mid-hold, ~75 ms more delay)
+GAME_REJECT = 0.75   # classifier must be this sure
+GAME_ON_MS = 100     # a gesture must last this long to count (live default 75; 150 felt laggy)
+GAME_OFF_MS = 150    # ... and neutral this long to let go (live default 50): a short dropout keeps W held
+
 POSE_NAMES = {"fist": "fist", "wave in": "wave_in", "wave out": "wave_out",
               "fingers spread": "fingers_spread", "double tap": "double_tap"}
 
@@ -29,9 +40,12 @@ class MyoSource(Source):
     name = "myo"
 
     def __init__(self, mode="builtin", user=None, sides=None, pointer_sides=("right",),
-                 move="air", click="fist", fake=False):
+                 move="air", click="fist", fake=False, reject=GAME_REJECT, gesture_sides=None,
+                 on_ms=GAME_ON_MS, off_ms=GAME_OFF_MS):
         super().__init__()
-        self.mode, self.user, self.sides = mode, user, sides
+        self.mode, self.user, self.sides, self.reject = mode, user, sides, reject
+        self.gesture_sides = gesture_sides   # mode "gestures": None = every band with a gesture model
+        self.on_ms, self.off_ms = on_ms, off_ms
         self.pointer_sides, self.move, self.click, self.fake = tuple(pointer_sides), move, click, fake
         self.synced = {}
 
@@ -43,7 +57,9 @@ class MyoSource(Source):
 
     def _start(self):
         if self.mode == "trained":
-            self._thread(self._trained)
+            self._thread(self._trained, self._sides())
+        elif self.mode == "gestures":
+            self._start_gestures()
         else:
             if self.fake:
                 self.status = "built-in mode needs real bands (use mode 'trained' with fake)"
@@ -56,10 +72,9 @@ class MyoSource(Source):
             self.status = "connecting..."
 
     # ── our trained click model, reusing myomouse's band processes ──
-    def _trained(self):
+    def _trained(self, sides):
         from myomouse import config as C
         from myomouse.run import start_bands
-        sides = self._sides()
         q, procs = start_bands(self.user, sides, "lda", self.fake, False, False, self.click, self.move, "both")
         self.status = "connecting..."
         try:
@@ -77,6 +92,65 @@ class MyoSource(Source):
         finally:
             for p in procs:
                 p.terminate()
+
+    # ── our 5-gesture model (gestures11), one band connection per gesture side ──
+    def _start_gestures(self):
+        from myomouse.gestures11 import model_path
+        sides = self._sides()
+        g_sides = [s for s in sides if model_path(self.user, s).exists()
+                   and (self.gesture_sides is None or s in self.gesture_sides)]
+        if not g_sides:
+            self.status = (f"no gesture model for {self.user} ({', '.join(sides)}): "
+                           f"run python -m myomouse.gestures11.train --user {self.user} --side <side>")
+            return
+        for side in g_sides:
+            self._thread(self._gestures, side)
+        rest = [s for s in sides if s not in g_sides]
+        if rest:   # the other band: trained click + pointer, like mode "trained"
+            self._thread(self._trained, rest)
+        self.status = "connecting..."
+
+    def _gestures(self, side):
+        import joblib
+        from myomouse.device import open_band
+        from myomouse.gestures11 import STEP, model_path
+        from myomouse.gestures11.live import GestureClassifier
+        from myomouse.pointer import make_pointer
+        decision_ms = STEP * 1000 / 200   # EMG at 200 Hz
+        clf = GestureClassifier(joblib.load(model_path(self.user, side)), self.reject,
+                                max(1, round(self.on_ms / decision_ms)), max(1, round(self.off_ms / decision_ms)))
+        edges = EdgeTracker("myo", self.emit)
+        band = open_band(side, fake=self.fake)
+
+        def on_emg(sample):
+            g = clf.push(sample)
+            if g is not None:
+                self.on_gesture(side, edges, g)
+        band.add_emg_handler(on_emg)
+        if side in self.pointer_sides:
+            ptr = make_pointer(self.move)
+
+            def on_imu(quat, acc, gyro):
+                dx, dy = ptr.update(quat, acc, gyro)
+                if dx or dy:
+                    self.emit(Event("myo", f"{side}.pointer", "value", (dx, dy)))
+            band.add_imu_handler(on_imu)
+        band.start()
+        self.status = f"{side}: gestures running"
+        try:
+            while not self._stop.is_set() and band.alive:
+                time.sleep(0.1)
+            if not band.alive:
+                self.status = f"{side} band disconnected: {getattr(band, 'error', '')}"
+        finally:
+            edges.clear()
+            band.stop()
+
+    @staticmethod
+    def on_gesture(side, edges, gesture):
+        """The shown gesture changed -> press / release. neutral / rest = no gesture."""
+        from myomouse.gestures11 import IDLE_KEYS
+        edges.set(side, None if gesture in IDLE_KEYS else gesture)
 
     # ── the band's built-in classifier + IMU pointer, one BLE thread per band ──
     def _builtin(self, side, address):
