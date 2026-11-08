@@ -42,6 +42,21 @@ def get_active_context() -> str:
         Quartz.kCGNullWindowID,
     )
 
+    if _sys.platform == "win32":
+        # Windows: the focused window is listed first and is the whole answer. The Start
+        # menu search (SearchHost / StartMenuExperienceHost) plays Spotlight's role.
+        owner = (windows[0].get("kCGWindowOwnerName") or "").lower() if windows else ""
+        ctx = "default"
+        if owner in ("searchhost", "searchapp", "startmenuexperiencehost"):
+            ctx = "spotlight"
+        else:
+            for key, c in _APP_CONTEXTS.items():
+                if key in owner:
+                    ctx = c
+                    break
+        _ctx_cache, _ctx_ts = ctx, now
+        return ctx
+
     # Overlay windows (Spotlight etc) first — these may float above the
     # active app without being a normal layer-0 window themselves.
     for w in windows:
