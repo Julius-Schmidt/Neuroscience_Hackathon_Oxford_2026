@@ -38,7 +38,7 @@ def band_worker(side, mode, pointer, fake, q, show, check):
     det = None if check else FistDetector(load_model(side), mode)
     recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
     band = open_band(side, fake=fake, seed=1 if side == "right" else 2)
-    ptr = Pointer() if pointer else None
+    ptr = Pointer(pointer if isinstance(pointer, str) else None) if pointer else None
     last_show = [0.0]
 
     def on_emg(sample):
@@ -81,7 +81,7 @@ def band_worker(side, mode, pointer, fake, q, show, check):
         band.stop()
 
 
-def start_bands(sides, mode, fake, show, check):
+def start_bands(sides, mode, fake, show, check, y_axis=None):
     """Check bands.json / models exist, then start one process per band. Returns (queue, procs)."""
     if not fake and not C.BANDS_FILE.exists():
         raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
@@ -96,7 +96,8 @@ def start_bands(sides, mode, fake, show, check):
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(s, mode, s == C.POINTER_SIDE, fake, q, show, check))
+                         args=(s, mode, (y_axis or C.POINTER_Y_AXIS) if s == C.POINTER_SIDE else None,
+                               fake, q, show, check))
              for s in sides]
     for p in procs:
         p.start()
@@ -186,6 +187,25 @@ class Controller:
         return out
 
 
+def add_pointer_args(ap):
+    ap.add_argument("--y-axis", choices=["pitch", "roll"], default=None,
+                    help="pitch = raise/lower the arm (default); roll = arm resting on a table, rotate the forearm")
+    ap.add_argument("--pointer", choices=["right", "left"], default=None,
+                    help="which band moves the cursor (default: config POINTER_SIDE)")
+    ap.add_argument("--button", choices=["left", "right"], default=None,
+                    help="one band only: which mouse button its fist presses")
+
+
+def apply_pointer_args(args):
+    """CLI overrides for config, applied in the main process (band processes get y_axis passed in)."""
+    if args.pointer:
+        C.POINTER_SIDE = args.pointer
+    if args.button:
+        sides = [s.strip() for s in args.sides.split(",") if s.strip()]
+        if len(sides) == 1:
+            C.BUTTON_FOR_SIDE = dict(C.BUTTON_FOR_SIDE, **{sides[0]: args.button})
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
@@ -197,19 +217,22 @@ def main():
                     help="no classifier: show EMG rate + muscle activity and move the cursor (use before training)")
     ap.add_argument("--no-window", action="store_true", help="no playground window, terminal only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
+    add_pointer_args(ap)
     args = ap.parse_args()
+    apply_pointer_args(args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if args.check:
         args.show = True
     window = not args.no_window
     # the window shows the probability bars, so the bands always send them then
-    q, procs = start_bands(sides, args.mode, args.fake, args.show or window, args.check)
+    q, procs = start_bands(sides, args.mode, args.fake, args.show or window, args.check, args.y_axis)
 
     ctrl = Controller(Mouse(args.dry_run), sides, print_probs=args.show and not window)
     t_start = time.perf_counter()
     label = "check (no classifier, bars = muscle activity)" if args.check else args.mode
-    print(f"mode={label} sides={sides} pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
+    print(f"mode={label} sides={sides} pointer={C.POINTER_SIDE} ({args.y_axis or C.POINTER_Y_AXIS}) "
+          f"buttons={C.BUTTON_FOR_SIDE} dry_run={args.dry_run}")
     stop = threading.Event()
 
     def consume():

@@ -56,6 +56,7 @@ class Session:
         self.pending = []
         self.events = []          # metadata of every click / timeout (for summary + replay)
         self.n_clicks = 0
+        self.cues = []            # fatigue protocol: (phase, t_session_s, {side: sample idx})
         self.csv_path = self.out_dir / f"{self.id}.csv"
         self._f = open(self.csv_path, "w", newline="")
         self._w = csv.writer(self._f)
@@ -66,6 +67,9 @@ class Session:
 
     def mark_phase(self, name):
         self.phases.append((name, self.t(), {s: b.n for s, b in self.bands.items()}))
+
+    def mark_cue(self, phase):
+        self.cues.append((phase, round(self.t(), 4), {s: b.n for s, b in self.bands.items()}))
 
     def _base(self, **kw):
         m = {c: "" for c in META_COLS}
@@ -165,6 +169,7 @@ class Session:
                 raw[f"{s}_{k}"] = getattr(b, k)[a:z]
             raw[f"{s}_start_idx"] = np.int64(a)
         raw["phases"] = np.array(json.dumps(self.phases))
+        raw["cues"] = np.array(json.dumps(self.cues))
         raw["events"] = np.array(json.dumps(self.events))
         raw["settings"] = np.array(json.dumps(self.settings))
         raw["cal"] = np.array(json.dumps({s: asdict(c) for s, c in cals.items()}))

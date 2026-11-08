@@ -4,7 +4,7 @@
     python -m devtool --user dylan --sides right    # one band
     python -m devtool --fake                        # no hardware: hold L / R to squeeze
 
-Modes:   1 live view    2 calibrate    3 click-target test
+Modes:   1 live view    2 calibrate    3 click-target test    4 fatigue protocol (raw EMG for replay)
 Keys:    Up/Down threshold    Left/Right refractory    [ ] cursor smoothing
          M cursor source (IMU / real mouse)    C re-centre cursor    G trace gain
          Space start (calibration / test)    Esc stop session or quit
@@ -45,11 +45,22 @@ def parse_args(argv=None):
     ap.add_argument("--sides", default="right,left")
     ap.add_argument("--fake", action="store_true", help="simulated bands; hold L / R keys to squeeze")
     ap.add_argument("--fake-drop", type=float, default=0.0, help="fake packet loss rate, e.g. 0.01")
+    ap.add_argument("--fake-fatigue", type=float, default=0.0,
+                    help="fake bands tire: seconds of squeezing to get tired (e.g. 40); 0 = never")
+    ap.add_argument("--fatigue-min", type=float, default=8.0, help="fatigue protocol: minutes of cued squeezes")
+    ap.add_argument("--fatigue-rest-min", type=float, default=3.0, help="fatigue protocol: minutes of rest (arms still)")
+    ap.add_argument("--fatigue-post-min", type=float, default=1.0, help="fatigue protocol: minutes of squeezes after rest")
+    ap.add_argument("--cue-interval", type=float, default=3.5, help="fatigue protocol: s between squeeze cues")
+    ap.add_argument("--cue-on", type=float, default=0.8, help="fatigue protocol: s the SQUEEZE cue is shown")
+    ap.add_argument("--autotest-fatigue", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--threshold", type=float, default=0.35, help="click when activation >= this (rest=0, typical squeeze=1)")
     ap.add_argument("--refractory", type=float, default=250, help="ms between clicks on one band (try 150-400)")
     ap.add_argument("--smoothing", type=float, default=MC.SMOOTHING, help="cursor smoothing 0..0.95")
     ap.add_argument("--cursor", choices=["imu", "mouse"], default=None,
                     help=f"imu = {MC.POINTER_SIDE} band orientation (default), mouse = real mouse (isolates clicks)")
+    ap.add_argument("--y-axis", choices=["pitch", "roll"], default=None,
+                    help="IMU cursor: pitch = raise/lower the arm; roll = forearm on a table, rotate it")
+    ap.add_argument("--pointer", choices=["right", "left"], default=None, help="which band moves the cursor")
     ap.add_argument("--targets", type=int, default=20, help="targets per test session")
     ap.add_argument("--target-timeout", type=float, default=10.0)
     ap.add_argument("--rest-still", type=float, default=20.0, help="s of still rest before targets")
@@ -67,20 +78,27 @@ def parse_args(argv=None):
 class App:
     def __init__(self, args):
         self.a = args
+        if args.pointer:
+            MC.POINTER_SIDE = args.pointer
+        y_axis = args.y_axis or MC.POINTER_Y_AXIS
         self.sides = [s.strip() for s in args.sides.split(",") if s.strip()]
         self.cals = load_calibration(DATA_DIR, args.user)
         self.threshold, self.refractory, self.smoothing = args.threshold, args.refractory, args.smoothing
         self.bands = {s: BandState(s, self.cals.get(s, BandCal()), self.threshold, self.refractory)
                       for s in self.sides}
         self.cursor_source = args.cursor or ("mouse" if args.fake or MC.POINTER_SIDE not in self.sides else "imu")
-        self.imu = Cursor(MC.GAIN_X, MC.GAIN_Y, MC.INVERT_X, MC.INVERT_Y, MC.DEADZONE_RAD, self.smoothing)
+        if y_axis == "roll":
+            self.imu = Cursor(MC.GAIN_X, MC.GAIN_ROLL, MC.INVERT_X, MC.INVERT_ROLL, MC.DEADZONE_RAD,
+                              self.smoothing, y_axis="roll")
+        else:
+            self.imu = Cursor(MC.GAIN_X, MC.GAIN_Y, MC.INVERT_X, MC.INVERT_Y, MC.DEADZONE_RAD, self.smoothing)
         self._acc = [0.0, 0.0]
         self._acc_lock = threading.Lock()
         self.freeze_until = 0.0
         if MC.POINTER_SIDE in self.bands:
             self.bands[MC.POINTER_SIDE].on_imu = self._on_imu
         if args.fake:
-            self.mgr = FakeManager(self.bands, drop_rate=args.fake_drop).start()
+            self.mgr = FakeManager(self.bands, drop_rate=args.fake_drop, fatigue_tau=args.fake_fatigue).start()
         else:
             from myomouse.device import load_bands
             addrs = load_bands()
@@ -281,7 +299,10 @@ class App:
         self.session = None
         self.phase = "done"
         self.target = None
+        fatigue = self.phase in FATIGUE_PHASES or self.mode == "fatigue"
         _, text = s.close(self.cals)
+        if fatigue:
+            text = fatigue_summary(s)
         self.summary_text = text + f"\nsaved {s.csv_path}"
         print("\n" + self.summary_text, flush=True)
 
@@ -289,6 +310,10 @@ class App:
         self.click_count[side] += 1
         self.flash[side] = time.perf_counter() + 0.25
         self.freeze_until = host_t + MC.FREEZE_MS / 1000
+        if self.session is not None and self.phase in FATIGUE_PHASES:
+            outcome = "false_rest" if self.phase == "recovery" else "cue_click"
+            self.session.add_click(side, idx, host_t, self.phase, outcome, (self.cx, self.cy), self.cursor_at)
+            return
         if self.session is None or self.phase not in ("rest_still", "rest_move", "targets"):
             return
         cur = self.cursor_at(host_t)
@@ -328,7 +353,7 @@ class App:
                     running = self.on_event(ev, test_area) and running
                 if self.a.seconds and time.perf_counter() - t_start > self.a.seconds:
                     running = False
-                if self.a.autotest:
+                if self.a.autotest or self.a.autotest_fatigue:
                     self.autotest(test_area)
                 self.update_cursor(pygame, test_area)
                 for s, b in self.bands.items():
@@ -337,6 +362,7 @@ class App:
                 self.update_rates()
                 self.tick_calibration()
                 self.tick_session()
+                self.tick_fatigue()
                 self.draw(W, H, test_area)
                 pygame.display.flip()
                 clock.tick(60)
@@ -369,11 +395,11 @@ class App:
             return False
         if k == pg.K_q:
             return False
-        if k in (pg.K_1, pg.K_2, pg.K_3):
+        if k in (pg.K_1, pg.K_2, pg.K_3, pg.K_4):
             if self.session is not None:
                 self.note("finish or Esc the session first")
             else:
-                self.mode = {pg.K_1: "live", pg.K_2: "calibrate", pg.K_3: "test"}[k]
+                self.mode = {pg.K_1: "live", pg.K_2: "calibrate", pg.K_3: "test", pg.K_4: "fatigue"}[k]
                 self.cal_state = None
                 self.phase = "idle" if self.mode == "test" else self.phase
         elif k == pg.K_SPACE:
@@ -381,6 +407,8 @@ class App:
                 self.start_calibration()
             elif self.mode == "test" and self.session is None:
                 self.start_session(test_area)
+            elif self.mode == "fatigue" and self.session is None:
+                self.start_fatigue()
         elif k == pg.K_UP:
             self.change("threshold", 0.02)
         elif k == pg.K_DOWN:
@@ -427,7 +455,7 @@ class App:
         # top bar
         cal_txt = ", ".join(f"{s}: {'calibrated' if self.cals.get(s, BandCal()).calibrated else 'UNCALIBRATED'}"
                             for s in self.sides)
-        self.text(f"[1] live  [2] calibrate  [3] test      mode: {self.mode.upper()}      user: {self.a.user}"
+        self.text(f"[1] live  [2] calibrate  [3] test  [4] fatigue      mode: {self.mode.upper()}      user: {self.a.user}"
                   f"   ({cal_txt})", (12, 8), FG)
         st = self.settings()
         self.text(f"threshold {st['threshold']:.2f} (Up/Down)   refractory {st['refractory_ms']} ms (Left/Right)   "
@@ -438,6 +466,8 @@ class App:
             self.draw_live(W, H)
         elif self.mode == "calibrate":
             self.draw_calibrate(W, H)
+        elif self.mode == "fatigue":
+            self.draw_fatigue(W, H)
         else:
             self.draw_test(W, H, test_area)
         if time.perf_counter() < self.msg_until:
@@ -598,11 +628,94 @@ class App:
         pg.draw.line(self.screen, cc, (self.cx, self.cy + 11), (self.cx, self.cy + 16), 2)
         self.draw_band_strip(W, H)
 
+    # ------------------------------------------------------------------ fatigue protocol
+    def start_fatigue(self):
+        """Cued squeezes for --fatigue-min, still rest for --fatigue-rest-min, cued squeezes again
+        for --fatigue-post-min. Every sample is saved to <id>_raw.npz with phases and cue times,
+        for `python -m devtool.replay_fatigue` (fixed vs fatigue-adaptive threshold)."""
+        self.session = Session(DATA_DIR / "sessions", self.a.user + "_fatigue", self.bands, self.settings(),
+                               0.0, 0.0, self.a.pre_ms, self.a.post_ms)
+        self.summary_text = ""
+        self.cue_until, self.next_cue, self.n_cues = 0.0, None, 0
+        self.phase, self.phase_t = "f_countdown", time.perf_counter()
+
+    def _fatigue_phase(self, name):
+        self.phase, self.phase_t = name, time.perf_counter()
+        self.session.mark_phase(name)
+        self.cue_until = 0.0
+        self.next_cue = self.phase_t + 1.0 if name in ("fatigue", "post") else None
+
+    def tick_fatigue(self):
+        if self.session is None or self.phase not in FATIGUE_PHASES + ("f_countdown",):
+            return
+        now = time.perf_counter()
+        el = now - self.phase_t
+        if self.phase == "f_countdown":
+            if el >= 3:
+                self._fatigue_phase("fatigue")
+        elif self.phase == "fatigue" and el >= self.a.fatigue_min * 60:
+            self._fatigue_phase("recovery")
+        elif self.phase == "recovery" and el >= self.a.fatigue_rest_min * 60:
+            self._fatigue_phase("post")
+        elif self.phase == "post" and el >= self.a.fatigue_post_min * 60:
+            self.end_session()
+            return
+        if self.next_cue is not None and now >= self.next_cue:
+            self.session.mark_cue(self.phase)
+            self.n_cues += 1
+            self.cue_until = now + self.a.cue_on
+            self.next_cue += self.a.cue_interval
+        self.session.poll()
+
+    def draw_fatigue(self, W, H):
+        if self.session is None:
+            lines = ["Fatigue protocol for user: " + self.a.user,
+                     f"{self.a.fatigue_min:g} min: squeeze BOTH hands every time the screen says SQUEEZE "
+                     f"(every {self.a.cue_interval:g} s), like a normal click.",
+                     "Keep going even when it gets hard - that is the point. Don't squeeze harder to compensate.",
+                     f"Then {self.a.fatigue_rest_min:g} min rest, arms still (any click here is a false click),",
+                     f"then {self.a.fatigue_post_min:g} min of squeezes again (recovery).",
+                     "Calibrate first (mode 2). Everything is saved for replay.", "",
+                     "Press SPACE to start.   Esc stops early (what was recorded is saved)."]
+            for i, l in enumerate(lines):
+                self.text(l, (60, 100 + 34 * i), FG, self.big if i == 0 else None)
+            if self.summary_text:
+                for i, l in enumerate(self.summary_text.splitlines()):
+                    self.text(l, (60, 400 + 22 * i), OK)
+        else:
+            now = time.perf_counter()
+            el = now - self.phase_t
+            total = {"f_countdown": 3, "fatigue": self.a.fatigue_min * 60, "recovery": self.a.fatigue_rest_min * 60,
+                     "post": self.a.fatigue_post_min * 60}[self.phase]
+            title = {"f_countdown": "get ready", "fatigue": "FATIGUE: squeeze on every cue",
+                     "recovery": "REST: arms still, hands relaxed", "post": "AFTER REST: squeeze on every cue"}
+            self.text(title[self.phase], (60, 100), FG, self.big)
+            self.text(f"{max(total - el, 0):5.0f} s left in this part     cues so far {self.n_cues}     "
+                      f"clicks " + "  ".join(f"{s} {self.click_count[s]}" for s in self.sides), (60, 145), DIM)
+            if now < self.cue_until:
+                self.pg.draw.rect(self.screen, BAD, (60, 190, W - 120, 220), border_radius=12)
+                self.text("SQUEEZE", (W // 2 - 70, 285), FG, self.big)
+            elif self.phase in ("fatigue", "post"):
+                self.pg.draw.rect(self.screen, PANEL, (60, 190, W - 120, 220), border_radius=12)
+                self.text("relax", (W // 2 - 40, 285), DIM, self.big)
+        self.draw_band_strip(W, H)
+
     # ------------------------------------------------------------------ self-test (fake bands)
     def autotest(self, area):
         """Drives the UI with fake bands: calibrate, then a session where the fake 'user' moves
         the cursor to each target and squeezes the right band. Used by tests only."""
         now = time.perf_counter()
+        if self.a.autotest_fatigue:
+            if not getattr(self, "_auto_f", False):
+                self._auto_f = True
+                self.mode = "fatigue"
+                self.start_fatigue()
+            elif self.session is None:
+                self.a.seconds = 0.01
+            else:
+                for s in self.mgr.squeeze:
+                    self.mgr.squeeze[s] = now < self.cue_until - 0.2   # ~0.6 s squeeze per cue
+            return
         st = getattr(self, "_auto", None)
         if st is None:
             self._auto = st = {"stage": "cal", "next": now}
@@ -637,6 +750,29 @@ class App:
                 squeeze_side = wrong[0] if (tid % 4 == 0 and wrong and 0.3 < k < 0.6) else want
                 for s in self.mgr.squeeze:
                     self.mgr.squeeze[s] = (s == squeeze_side) and (0.3 < k < 0.6 or 0.9 < k < 1.2)
+
+
+FATIGUE_PHASES = ("fatigue", "recovery", "post")
+
+
+def fatigue_summary(s: Session) -> str:
+    cues = {}
+    for phase, _t, _i in s.cues:
+        cues[phase] = cues.get(phase, 0) + 1
+    clicks = {}
+    for e in s.events:
+        if e["event"] == "click":
+            key = (e["phase"], e["band"])
+            clicks[key] = clicks.get(key, 0) + 1
+    bands = sorted({b for _p, b in clicks} | set(s.bands))
+    lines = [f"fatigue session {s.id}: {cues.get('fatigue', 0)} cues during fatigue, "
+             f"{cues.get('post', 0)} after rest"]
+    for b in bands:
+        lines.append(f"  {b}: clicks during fatigue {clicks.get(('fatigue', b), 0)}, "
+                     f"false clicks during rest {clicks.get(('recovery', b), 0)}, "
+                     f"after rest {clicks.get(('post', b), 0)}")
+    lines.append(f"compare fixed vs adaptive:  python -m devtool.replay_fatigue {s.out_dir / (s.id + '_raw.npz')}")
+    return "\n".join(lines)
 
 
 def main(argv=None):

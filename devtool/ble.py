@@ -244,8 +244,9 @@ class FakeManager:
     drop_rate > 0 skips packets to exercise the drop counter.
     """
 
-    def __init__(self, bands: dict[str, BandState], drop_rate=0.0, seed=0):
+    def __init__(self, bands: dict[str, BandState], drop_rate=0.0, seed=0, fatigue_tau=0.0):
         self.bands = bands
+        self.fatigue_tau = fatigue_tau   # s of squeezing to tire; 0 = never tires
         self.squeeze = {s: False for s in bands}
         self.drop_rate = drop_rate
         self.rng = np.random.default_rng(seed)
@@ -270,6 +271,7 @@ class FakeManager:
         st.status, st.connected, st.battery = "streaming (fake)", True, 87
         gain = np.array([1.0, 1.4, 1.8, 1.6, 1.2, 0.8, 0.6, 0.7])
         level = 0.0
+        tired = 0.0   # 0 fresh .. 1 exhausted (squeezes drop to 30%); recovers ~5x slower than it builds
         t_start = time.perf_counter()
         k = 0
         while self._running:
@@ -279,9 +281,15 @@ class FakeManager:
                 time.sleep(delay)
             target = 1.0 if self.squeeze[side] else 0.0
             level += (target - level) * 0.35  # ~30 ms rise
+            if self.fatigue_tau > 0:
+                if self.squeeze[side]:
+                    tired += 0.010 / self.fatigue_tau * (1 - tired)
+                else:
+                    tired -= 0.010 / (5 * self.fatigue_tau) * tired
+            strength = 1.0 - 0.7 * tired
             samples = []
             for _ in range(2):
-                amp = 2.0 + 28.0 * level * gain
+                amp = 2.0 + 28.0 * level * strength * gain
                 samples.extend(int(v) for v in np.clip(self.rng.normal(0, amp), -128, 127))
             if self.rng.random() >= self.drop_rate:
                 st.handle_packet(k % 4, struct.pack("<16b", *samples), time.perf_counter())

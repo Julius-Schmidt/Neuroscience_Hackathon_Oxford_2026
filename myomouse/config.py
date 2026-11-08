@@ -29,6 +29,14 @@ DEADZONE_RAD = 0.0015      # ignore tiny per-sample jitter (radians per IMU samp
 SMOOTHING = 0.5            # 0 = no smoothing, closer to 1 = smoother but laggier
 FREEZE_MS = 150            # freeze the cursor this long after a press/release
 
+# --- Arm resting on a table (sliding can't be tracked by the IMU; rotations can) -----
+# "pitch": raise/lower the forearm moves the cursor up/down (arm in the air, the original)
+# "roll":  forearm rests on the table; sweep it left/right (pivot at the elbow) for x and
+#          rotate it (palm down <-> thumb up) for y.  CLI: --y-axis roll
+POINTER_Y_AXIS = "pitch"
+GAIN_ROLL = 900.0          # pixels per radian of forearm roll (only when POINTER_Y_AXIS = "roll")
+INVERT_ROLL = False        # flip if rolling moves the cursor the wrong way up/down
+
 # --- What each fist does -----------------------------------------------------
 # right fist -> left button (hold = drag), left fist -> right button
 BUTTON_FOR_SIDE = {"right": "left", "left": "right"}

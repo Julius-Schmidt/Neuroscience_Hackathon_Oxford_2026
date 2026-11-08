@@ -28,6 +28,13 @@ def yaw_pitch(q):
     return math.atan2(d[1], d[0]), math.asin(max(-1.0, min(1.0, d[2])))
 
 
+def roll_angle(q) -> float:
+    """Rotation about the band's x-axis (the forearm): palm down <-> thumb up.
+    Euler roll (ZYX), accurate while the forearm is roughly level, e.g. resting on a table."""
+    w, x, y, z = (v / QUAT_SCALE for v in q)
+    return math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+
+
 def wrap(a: float) -> float:
     return (a + math.pi) % (2 * math.pi) - math.pi
 
@@ -35,25 +42,30 @@ def wrap(a: float) -> float:
 class Pointer:
     """Feed quaternions; get (dx, dy) pixel deltas back."""
 
-    def __init__(self):
+    def __init__(self, y_axis=None):
+        self.y_axis = y_axis or C.POINTER_Y_AXIS          # "pitch" (arm in the air) or "roll" (arm on a table)
         self.prev = None
         self.vx = self.vy = 0.0
 
     def update(self, q):
         yaw, pitch = yaw_pitch(q)
+        second = roll_angle(q) if self.y_axis == "roll" else pitch
         if self.prev is None:
-            self.prev = (yaw, pitch)
+            self.prev = (yaw, second)
             return 0.0, 0.0
         dyaw = wrap(yaw - self.prev[0])
-        dpitch = pitch - self.prev[1]
-        self.prev = (yaw, pitch)
+        dsec = wrap(second - self.prev[1])
+        self.prev = (yaw, second)
         if abs(dyaw) < C.DEADZONE_RAD:
             dyaw = 0.0
-        if abs(dpitch) < C.DEADZONE_RAD:
-            dpitch = 0.0
+        if abs(dsec) < C.DEADZONE_RAD:
+            dsec = 0.0
         # turning the arm left (yaw +) moves the cursor left; raising it moves the cursor up
         dx = -dyaw * C.GAIN_X * (-1 if C.INVERT_X else 1)
-        dy = -dpitch * C.GAIN_Y * (-1 if C.INVERT_Y else 1)
+        if self.y_axis == "roll":
+            dy = -dsec * C.GAIN_ROLL * (-1 if C.INVERT_ROLL else 1)
+        else:
+            dy = -dsec * C.GAIN_Y * (-1 if C.INVERT_Y else 1)
         a = C.SMOOTHING
         self.vx = a * self.vx + (1 - a) * dx
         self.vy = a * self.vy + (1 - a) * dy

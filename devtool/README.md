@@ -11,7 +11,7 @@ python -m devtool --fake               # no hardware: hold L / R to squeeze
 
 Close `myomouse.run` / `arena` first: a band only accepts one connection.
 
-## Modes (keys 1 / 2 / 3)
+## Modes (keys 1 / 2 / 3 / 4)
 
 **1 Live:** per band: connection status, battery, samples/s (green at 180–215, expect ~200),
 packets/s, dropped packets, click count, 8 raw EMG traces (last 2 s; `G` = ×1/×4/×16 gain),
@@ -29,6 +29,29 @@ well above it. Re-run per person, and after taking the bands off.
 3. 20 targets; orange = LEFT fist, blue = RIGHT fist. 10 s timeout per target.
 
 The summary appears on screen and in the terminal. Esc ends early (whatever was recorded is saved).
+
+**4 Fatigue protocol:** SPACE, then cued squeezes (both hands, every 3.5 s, `--cue-interval`) for 8 min
+(`--fatigue-min`), 3 min rest with arms still (`--fatigue-rest-min`; any click here is a false click),
+then 1 min of cued squeezes again (`--fatigue-post-min`). Calibrate first. Everything is saved to
+`<id>_fatigue_raw.npz` with phases and cue times. Squeeze like a normal click every time, even when
+tired: don't squeeze harder to compensate.
+
+```bash
+python -m devtool --user emily                                       # then 2 (calibrate), 4 (fatigue), SPACE
+python -m devtool.replay_fatigue data/devtool/sessions/<id>_fatigue_raw.npz   # fixed vs adaptive
+python -m devtool.replay_fatigue <file> --models models/emily     # + her LDA, fixed vs adaptive
+python -m devtool --fake --fake-fatigue 20                           # no hardware: fake bands that tire
+```
+
+`replay_fatigue` runs the fixed threshold and the fatigue-adaptive threshold (`devtool/fatigue.py`) on
+the same raw EMG and prints, per minute, how many cued squeezes each caught, plus false clicks.
+It saves `<id>_fatigue_replay.csv` and a chart `<id>_fatigue_replay.png`.
+
+**How the adaptive threshold works (`devtool/fatigue.py`):** every squeeze burst (a click, or a weaker
+near-miss that rose clearly above rest) is one measurement of the user's current squeeze strength.
+A 1-D Kalman filter tracks that strength; the threshold scales with it (after 5 warm-up squeezes).
+It never drops below 1.5 x the calibrated rest noise, and never rises above 1.5 x the base threshold.
+`FatigueTracker.gain()` gives the same information as a factor to rescale raw EMG before LDA features.
 
 ## Settings
 

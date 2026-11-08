@@ -21,7 +21,7 @@ import time
 from collections import deque
 
 from . import config as C
-from .run import start_bands
+from .run import add_pointer_args, apply_pointer_args, start_bands
 
 BG = (18, 20, 26)
 FG = (225, 228, 235)
@@ -99,12 +99,14 @@ def main():
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--check", action="store_true", help="no classifier: cursor only, click with Space/Enter")
     ap.add_argument("--size", default="1280x800")
+    add_pointer_args(ap)
     args = ap.parse_args()
+    apply_pointer_args(args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if C.POINTER_SIDE not in sides:
         print(f"note: the pointer band ({C.POINTER_SIDE}) isn't running, so the cursor won't move")
-    q, procs = start_bands(sides, args.mode, args.fake, True, args.check)
+    q, procs = start_bands(sides, args.mode, args.fake, True, args.check, args.y_axis)
     status = {s: "connecting..." for s in sides}
     probs = {s: 0.0 for s in sides}
 
@@ -244,8 +246,12 @@ def main():
         print(f"hits {arena.hits}, misses {arena.misses}")
         if arena.gain != 1.0 or arena.inv_x or arena.inv_y:
             print("To keep these settings, put this in myomouse/config.py:")
-            print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_Y = {C.GAIN_Y * arena.gain:.0f}")
-            print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
+            if (args.y_axis or C.POINTER_Y_AXIS) == "roll":
+                print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_ROLL = {C.GAIN_ROLL * arena.gain:.0f}")
+                print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_ROLL = {arena.inv_y != C.INVERT_ROLL}")
+            else:
+                print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_Y = {C.GAIN_Y * arena.gain:.0f}")
+                print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
 
 
 if __name__ == "__main__":

@@ -178,7 +178,9 @@ def find_onset(fast_act: np.ndarray, detect_pos: int, threshold: float, frac=0.5
 class Cursor:
     """IMU quaternion -> pixel deltas, same maths as myomouse.pointer but smoothing is a parameter."""
 
-    def __init__(self, gain_x, gain_y, invert_x=False, invert_y=False, deadzone=0.0015, smoothing=0.5):
+    def __init__(self, gain_x, gain_y, invert_x=False, invert_y=False, deadzone=0.0015, smoothing=0.5,
+                 y_axis="pitch"):
+        self.y_axis = y_axis   # "pitch" = arm in the air, "roll" = forearm resting on a table
         self.gain_x, self.gain_y = gain_x, gain_y
         self.invert_x, self.invert_y = invert_x, invert_y
         self.deadzone, self.smoothing = deadzone, smoothing
@@ -186,12 +188,14 @@ class Cursor:
         self.vx = self.vy = 0.0
 
     def update(self, quat):
-        from myomouse.pointer import wrap, yaw_pitch
+        from myomouse.pointer import roll_angle, wrap, yaw_pitch
         yaw, pitch = yaw_pitch(quat)
+        if self.y_axis == "roll":
+            pitch = roll_angle(quat)
         if self.prev is None:
             self.prev = (yaw, pitch)
             return 0.0, 0.0
-        dyaw, dpitch = wrap(yaw - self.prev[0]), pitch - self.prev[1]
+        dyaw, dpitch = wrap(yaw - self.prev[0]), wrap(pitch - self.prev[1])
         self.prev = (yaw, pitch)
         dyaw = 0.0 if abs(dyaw) < self.deadzone else dyaw
         dpitch = 0.0 if abs(dpitch) < self.deadzone else dpitch
