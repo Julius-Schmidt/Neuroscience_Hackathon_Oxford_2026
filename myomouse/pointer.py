@@ -55,11 +55,16 @@ class Pointer:
             return 0.0, 0.0
         dyaw = wrap(yaw - self.prev[0])
         dsec = wrap(second - self.prev[1])
-        self.prev = (yaw, second)
+        # dead zone = hysteresis: a small change is held back (not thrown away) until it adds
+        # up past the threshold, so slow deliberate movements still move the cursor
         if abs(dyaw) < C.DEADZONE_RAD:
             dyaw = 0.0
+        else:
+            self.prev = (yaw, self.prev[1])
         if abs(dsec) < C.DEADZONE_RAD:
             dsec = 0.0
+        else:
+            self.prev = (self.prev[0], second)
         # turning the arm left (yaw +) moves the cursor left; raising it moves the cursor up
         dx = -dyaw * C.GAIN_X * (-1 if C.INVERT_X else 1)
         if self.y_axis == "roll":

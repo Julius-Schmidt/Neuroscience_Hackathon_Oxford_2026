@@ -33,7 +33,7 @@ def band_worker(side, mode, pointer, fake, q, show, check):
     from .detector import FistDetector, load_model
     from .device import open_band
     from .features import envelope
-    from .pointer import Pointer
+    from .pointer import Pointer, roll_angle, yaw_pitch
 
     det = None if check else FistDetector(load_model(side), mode)
     recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
@@ -60,6 +60,9 @@ def band_worker(side, mode, pointer, fake, q, show, check):
         dx, dy = ptr.update(quat)
         if dx or dy:
             q.put(("move", dx, dy, time.perf_counter()))
+        # raw forearm angles too, so the arena can try other mappings live (run ignores these)
+        yaw, pitch = yaw_pitch(quat)
+        q.put(("ori", (yaw, pitch, roll_angle(quat)), None, time.perf_counter()))
 
     band.add_emg_handler(on_emg)
     if ptr:
@@ -209,7 +212,8 @@ def apply_pointer_args(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
-    ap.add_argument("--sides", default="right,left", help="e.g. 'right' to run one band only")
+    ap.add_argument("--sides", default=None,
+                    help="e.g. 'right' for one band; default = the bands in bands.json")
     ap.add_argument("--dry-run", action="store_true", help="don't touch the real mouse")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--show", action="store_true", help="print live fist probabilities")
@@ -219,6 +223,8 @@ def main():
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
     add_pointer_args(ap)
     args = ap.parse_args()
+    from .device import default_sides
+    args.sides = args.sides or default_sides(args.fake)
     apply_pointer_args(args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]

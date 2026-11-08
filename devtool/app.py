@@ -42,7 +42,8 @@ TRACE_S = 2.0
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--user", default="default", help="calibration + session files are saved per user")
-    ap.add_argument("--sides", default="right,left")
+    ap.add_argument("--sides", default=None,
+                    help="e.g. 'right' for one band; default = the bands in bands.json")
     ap.add_argument("--fake", action="store_true", help="simulated bands; hold L / R keys to squeeze")
     ap.add_argument("--fake-drop", type=float, default=0.0, help="fake packet loss rate, e.g. 0.01")
     ap.add_argument("--fake-fatigue", type=float, default=0.0,
@@ -72,7 +73,10 @@ def parse_args(argv=None):
     ap.add_argument("--size", default="1400x860")
     ap.add_argument("--seconds", type=float, default=0, help="quit after this long (testing)")
     ap.add_argument("--autotest", action="store_true", help=argparse.SUPPRESS)
-    return ap.parse_args(argv)
+    a = ap.parse_args(argv)
+    from myomouse.device import default_sides
+    a.sides = a.sides or default_sides(a.fake)
+    return a
 
 
 class App:

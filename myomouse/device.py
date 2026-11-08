@@ -61,6 +61,19 @@ async def discover_myos(seconds=6.0):
     return sorted(out, key=lambda x: -x[2])
 
 
+def default_sides(fake=False) -> str:
+    """The bands in bands.json (e.g. just 'right' when only one band was identified).
+    Fake mode or no bands.json: both. So with one band you don't need --sides."""
+    if fake or not C.BANDS_FILE.exists():
+        return "right,left"
+    try:
+        found = json.loads(C.BANDS_FILE.read_text())
+    except Exception:
+        return "right,left"
+    sides = [s for s in ("right", "left") if s in found]
+    return ",".join(sides) or "right,left"
+
+
 def load_bands():
     if not C.BANDS_FILE.exists():
         raise FileNotFoundError("bands.json missing. Run `python -m myomouse.identify` first.")
