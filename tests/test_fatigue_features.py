@@ -1,0 +1,19 @@
+import numpy as np
+from devtool.fatigue_features import spectrum_features
+
+
+def _noise(cut_hz, n=300, seed=0):
+    """Band-limited noise: 8 channels, low-passed at cut_hz (200 Hz sampling)."""
+    rng = np.random.default_rng(seed)
+    X = np.fft.rfft(rng.normal(size=(n, 8)), axis=0)
+    f = np.fft.rfftfreq(n, 1 / 200)
+    X[f > cut_hz] = 0
+    return np.fft.irfft(X, n=n, axis=0) * 20
+
+
+def test_spectral_features_follow_a_shift_to_low_frequencies():
+    fresh, tired = spectrum_features(_noise(90)), spectrum_features(_noise(45))
+    assert tired["mdf"] < fresh["mdf"] and tired["mnf"] < fresh["mnf"]
+    assert tired["dimitrov"] > fresh["dimitrov"]
+    assert tired["low_frac"] > fresh["low_frac"]
+    assert tired["zc"] < fresh["zc"]
