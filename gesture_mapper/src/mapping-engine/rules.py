@@ -65,7 +65,7 @@ ACTIONS = {
     "key_hold":    {"label": "hold key",            "params": {"key": "w"}},
     "mouse_click": {"label": "click mouse",         "params": {"button": "left"}},
     "mouse_hold":  {"label": "hold mouse button",   "params": {"button": "left"}},
-    "mouse_move":  {"label": "move mouse by value x", "params": {"gain": 1.0}},
+    "mouse_move":  {"label": "move mouse by value x", "params": {"gain": 1.0, "flip_x": False, "flip_y": False}},
     "scroll":      {"label": "scroll",              "params": {"amount": -3}},
     "type_text":   {"label": "type",                "params": {"text": "hello"}},
     "shortcut":    {"label": "press shortcut",      "params": {"keys": "ctrl+c"}},

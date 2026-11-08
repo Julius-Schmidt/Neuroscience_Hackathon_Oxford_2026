@@ -181,6 +181,17 @@ class BlockWidget(QFrame):
         lay.addWidget(sb)
         return sb
 
+    def _check(self, lay, field, text):
+        cb = QCheckBox(text)
+        cb.setChecked(bool(self.data.get(field, False)))
+        cb.setStyleSheet(f"QCheckBox {{ color: {theme.TEXT}; font-weight: 600; background: transparent; spacing: 6px; }}"
+                         f"QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px;"
+                         f" border: 1px solid {theme.TEXT_DIM}; background: {theme.FIELD}; }}"
+                         f"QCheckBox::indicator:checked {{ background: {theme.ACCENT}; border: 1px solid {theme.ACCENT}; }}")
+        cb.toggled.connect(lambda v: self._set(field, bool(v)))
+        lay.addWidget(cb)
+        return cb
+
     def _set(self, field, value):
         self.data[field] = value
         self.changed.emit()
@@ -204,6 +215,8 @@ class BlockWidget(QFrame):
         elif t == "mouse_move":
             self._lbl(lay, "move mouse with value  x")
             self._num(lay, "gain", 0.1, 10.0, 0.1)
+            self._check(lay, "flip_x", "flip left/right")
+            self._check(lay, "flip_y", "flip up/down")
         elif t == "scroll":
             self._lbl(lay, "scroll")
             self._num(lay, "amount", -20, 20, 1, decimals=0)
@@ -342,7 +355,9 @@ def action_text(a: dict) -> str:
         "type_text": lambda: f"type \u201c{a.get('text')}\u201d",
         "mouse_click": lambda: f"{a.get('button')} click",
         "mouse_hold": lambda: f"hold {a.get('button')} button",
-        "mouse_move": lambda: f"move mouse \u00d7{a.get('gain')}",
+        "mouse_move": lambda: f"move mouse \u00d7{a.get('gain')}"
+                              + (" (flipped " + "/".join(k for k, f in (("left-right", "flip_x"), ("up-down", "flip_y"))
+                                                         if a.get(f)) + ")" if a.get("flip_x") or a.get("flip_y") else ""),
         "scroll": lambda: f"scroll {a.get('amount')}",
         "command": lambda: _cmd_label(a.get("name")),
         "command_hold": lambda: f"hold {_cmd_label(a.get('name'))}",

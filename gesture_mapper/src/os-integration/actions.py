@@ -181,7 +181,9 @@ class OSExecutor:
         elif t == "mouse_move":
             v = ev.value if isinstance(ev.value, (tuple, list)) else (ev.value or 0, 0)
             g = float(a.get("gain", 1.0))
-            _move(v[0] * g, (v[1] if len(v) > 1 else 0) * g)
+            sx = -1.0 if a.get("flip_x") else 1.0     # depends on which way round the band is worn
+            sy = -1.0 if a.get("flip_y") else 1.0
+            _move(v[0] * g * sx, (v[1] if len(v) > 1 else 0) * g * sy)
         elif t == "scroll":
             _scroll(int(a.get("amount", -3)))
         elif t == "type_text":

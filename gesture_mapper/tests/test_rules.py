@@ -111,6 +111,9 @@ if hasattr(Q, "posted"):
                                       rule("myo", "right.fist", "press", [("shortcut", {"keys": "ctrl+c"})])]})
     eng.handle(R.Event("myo", "right.pointer", "value", (3, -4)))
     check(Q.posted and Q.posted[-1] == ("move_abs", 406, 292), f"pointer value moves the mouse ({Q.posted[-1:]})")
+    eng.data["rules"][0]["actions"][0]["flip_y"] = True
+    eng.handle(R.Event("myo", "right.pointer", "value", (0, -4)))
+    check(Q.posted[-1] == ("move_abs", 406, 300), f"flip up/down inverts y ({Q.posted[-1:]})")
     Q.posted.clear()
     eng.handle(R.Event("myo", "right.fist", "press"))
     keys = [p for p in Q.posted if p[0] == "key"]
