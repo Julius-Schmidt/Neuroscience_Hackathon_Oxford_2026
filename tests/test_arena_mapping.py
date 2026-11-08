@@ -11,6 +11,7 @@ def feed(m, angs, w=1000, h=800):
 
 def test_relative_moves_left_when_turning():
     m = Mapping("pitch")
+    m.mode = "relative"
     feed(m, [(0, 0, 0)] * 30)
     out = feed(m, [(0.01 * i, 0, 0) for i in range(1, 6)])
     assert out[0] == "delta" and out[1] < 0
@@ -78,6 +79,7 @@ def test_calibration_tilted_reach_still_reaches_corners():
 
 def test_relative_slow_movement_is_not_lost():
     m = Mapping("pitch")
+    m.mode = "relative"
     feed(m, [(0, 0, 0)] * 50)
     total = 0.0
     for i in range(1, 501):                       # 0.2 rad over 10 s = ~1.1 deg/s, very slow
@@ -99,3 +101,9 @@ def test_claw_two_stops_click_and_compensate_lag():
     for _ in range(25):
         t += 0.02; c.update(t, 0.02)
     assert c.stop(t) and 0.1 < c.y < 0.3
+
+
+def test_band_mode_leaves_cursor_to_the_band_pointer():
+    m = Mapping("roll")
+    assert m.mode == "band"
+    assert feed(m, [(0.01 * i, 0, 0) for i in range(20)]) is None

@@ -5,7 +5,7 @@ so whatever happens here also happens on your desktop:
   - the cursor leaves a trail, every click shows a ripple (blue = left, orange = right)
   - LEFT click a block -> it changes colour
   - RIGHT button held on a block -> drag it somewhere else, release to drop
-  - the side panel shows each band, its live fist probability and the last events
+  - the side panel shows each band, its live click probability and the last events
 
 With --dry-run the real mouse isn't touched, so the window draws its own cursor instead.
 """
@@ -129,7 +129,7 @@ def run_window(ctrl, procs, sides, dry, check, seconds=0):
         for kind, a, b in ctrl.drain():
             if kind == "btn":
                 name = C.BUTTON_FOR_SIDE[a]
-                pg.note(f"{a} fist -> {name.upper()} {'down' if b == 'press' else 'up'}",
+                pg.note(f"{a} {ctrl.word} -> {name.upper()} {'down' if b == 'press' else 'up'}",
                         BUTTON_COLOR[name], now)
                 if dry:  # no real mouse: feed the playground directly
                     x, y = ctrl.mouse.vpos
@@ -177,9 +177,9 @@ def run_window(ctrl, procs, sides, dry, check, seconds=0):
             r = pygame.Rect(px + 16 + (0 if button == "left" else 150), y, 140, 58)
             pygame.draw.rect(screen, BUTTON_COLOR[button] if on else (50, 54, 64), r, border_radius=8)
             text(f"{button.upper()}", (r.x + 12, r.y + 6), FG, big)
-            text(f"{side} fist  {pg.clicks[button]}x", (r.x + 12, r.y + 36), FG if on else DIM, small)
+            text(f"{side} {ctrl.word}  {pg.clicks[button]}x", (r.x + 12, r.y + 36), FG if on else DIM, small)
         y += 78
-        label = "activity" if check else "fist p"
+        label = "activity" if check else f"{ctrl.word} p"
         for s in sides:
             bcol = BUTTON_COLOR[C.BUTTON_FOR_SIDE[s]]
             text(f"{s} band: {status[s]}", (px + 16, y), FG if status[s] == "ready" else DIM)

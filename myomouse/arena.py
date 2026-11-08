@@ -1,16 +1,19 @@
-"""Practice arena: move an on-screen cursor with your forearm and hit targets with fists.
+"""Practice arena: move an on-screen cursor and hit targets with clicks (fists, or index lifts).
 
 The arena draws its own cursor, so the real mouse is never touched: no Accessibility
 permission needed and no stray clicks on your desktop. It uses the same band processes
 as `myomouse.run`, so what works here works in the live demo.
 
-    python -m myomouse.arena                 # both bands, trained classifiers
-    python -m myomouse.arena --sides right   # pointer band only (left-click targets only)
-    python -m myomouse.arena --check         # no models yet: cursor only, Space/Enter click
-    python -m myomouse.arena --fake          # no hardware
+    python -m myomouse.arena --user dylan                 # the bands in bands.json, dylan's classifiers
+    python -m myomouse.arena --user julius --sides right  # pointer band only (left-click targets only)
+    python -m myomouse.arena --check                      # no models yet: cursor only, Space/Enter click
+    python -m myomouse.arena --user julius --fake         # no hardware
+    python -m myomouse.arena --user julius --move air     # the original 3D pointing + fist
+    python -m myomouse.arena --user julius --click index  # experimental: index lift
 
-Targets:  blue = left click (right fist),  orange = right click (left fist).
-Keys:  M  control: relative (angle change moves the cursor) / absolute (angle from origin =
+Targets:  blue = left click (right hand),  orange = right click (left hand).
+Keys:  M  control: band (the --move pointer the live demo uses: table / air / slide) /
+          relative (angle change moves the cursor) / absolute (angle from origin =
           cursor position) / joystick (angle from origin = cursor SPEED, small movements)
        A  axes: yaw+pitch (arm in the air) / yaw+roll (arm on a table) / roll+pitch
        K  calibrate: spend 10 s moving around your COMFORTABLE range (can be lopsided, e.g.
@@ -37,9 +40,11 @@ from collections import deque
 
 from . import config as C
 from .pointer import wrap
-from .run import add_pointer_args, apply_pointer_args, start_bands
+from .gestures import WORD, add_style_args
+from .run import start_bands
+from .users import add_user_arg, require_user
 
-MODES = ["relative", "absolute", "joystick"]
+MODES = ["band", "relative", "absolute", "joystick"]
 AXES = [("yaw", "pitch"), ("yaw", "roll"), ("roll", "pitch")]
 IDX = {"yaw": 0, "pitch": 1, "roll": 2}
 
@@ -88,7 +93,7 @@ class Mapping:
     """Forearm angles (yaw, pitch, roll) -> cursor, computed here so it can be changed live."""
 
     def __init__(self, y_axis):
-        self.mode = "relative"
+        self.mode = "band"                 # band = use the band's own --move pointer ('move' messages)
         self.axes = ("yaw", "roll") if y_axis == "roll" else ("yaw", "pitch")
         self.gx, self.gy = 1.0, 1.0       # multipliers on the base gains below
         self.deadzone = 0.06               # rad (~3.5 deg), joystick only
@@ -166,6 +171,8 @@ class Mapping:
         self.w, self.h = w, h
         if self.calib is not None:
             self.calib.append(self.sm)
+            return None
+        if self.mode == "band":
             return None
         ax, ay = IDX[self.axes[0]], IDX[self.axes[1]]
         sx = -1.0  # turning left / raising / rolling one way moves the cursor left / up
@@ -287,22 +294,27 @@ class Arena:
 
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap, required=False)
+    add_style_args(ap)
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
     ap.add_argument("--sides", default=None,
                     help="e.g. 'right' for one band; default = the bands in bands.json")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
     ap.add_argument("--check", action="store_true", help="no classifier: cursor only, click with Space/Enter")
     ap.add_argument("--size", default="1280x800")
-    add_pointer_args(ap)
     args = ap.parse_args()
     from .device import default_sides
     args.sides = args.sides or default_sides(args.fake)
-    apply_pointer_args(args)
+    if not args.check:
+        require_user(ap, args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if C.POINTER_SIDE not in sides:
         print(f"note: the pointer band ({C.POINTER_SIDE}) isn't running, so the cursor won't move")
-    q, procs = start_bands(sides, args.mode, args.fake, True, args.check, args.y_axis)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, True, args.check, args.click, args.move, args.axes)
+    word = WORD[args.click]
+    table = args.move in ("table", "slide")
+    gain_x = C.TABLE_GAIN_TURN if table else C.GAIN_X
     status = {s: "connecting..." for s in sides}
     probs = {s: 0.0 for s in sides}
 
@@ -330,7 +342,7 @@ def main():
             claw.reset()
             claw.last = (fx, fy)
             claw.pause_until = now + 0.6
-        else:
+        elif claw.x is not None:   # first stop (a fist during a pause is ignored)
             arena.x = claw.x * arena.w
 
     def draw_map():
@@ -375,7 +387,14 @@ def main():
 
     # with --check (or one band) only offer targets for buttons that can actually be clicked
     buttons = ["left", "right"] if (args.check and len(sides) > 1) else [C.BUTTON_FOR_SIDE[s] for s in sides]
-    mapping = Mapping(args.y_axis or C.POINTER_Y_AXIS)
+    mapping = Mapping("roll" if table else "pitch")
+
+    def scale(fx, fy):
+        if mapping.mode == "band":          # the band's pointer: one overall gain, like before
+            arena.gain *= fx * fy
+        else:
+            mapping.gx *= fx
+            mapping.gy *= fy
     last_ori = [None]
     arena = Arena(w, h, buttons)
 
@@ -396,19 +415,17 @@ def main():
                     if k in (pygame.K_ESCAPE, pygame.K_q):
                         running = False
                     elif k in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                        mapping.gx *= 1.15
-                        mapping.gy *= 1.15
+                        scale(1.15, 1.15) if mapping.mode != "band" else scale(1.15, 1.0)
                     elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                        mapping.gx /= 1.15
-                        mapping.gy /= 1.15
+                        scale(1 / 1.15, 1 / 1.15) if mapping.mode != "band" else scale(1 / 1.15, 1.0)
                     elif k == pygame.K_RIGHT:
-                        mapping.gx *= 1.15
+                        scale(1.15, 1.0)
                     elif k == pygame.K_LEFT:
-                        mapping.gx /= 1.15
+                        scale(1 / 1.15, 1.0)
                     elif k == pygame.K_UP:
-                        mapping.gy *= 1.15
+                        scale(1.0, 1.15)
                     elif k == pygame.K_DOWN:
-                        mapping.gy /= 1.15
+                        scale(1.0, 1 / 1.15)
                     elif k == pygame.K_m:
                         mapping.mode = MODES[(MODES.index(mapping.mode) + 1) % len(MODES)]
                         mapping.gx = mapping.gy = 1.0
@@ -477,12 +494,15 @@ def main():
                     dt = 0.02 if last_ori[0] is None else min(max(_t - last_ori[0], 0.0), 0.1)
                     last_ori[0] = _t
                     out = mapping.update(a, dt, arena.w, arena.h)
-                    if claw.on:
+                    if claw.on or mapping.mode == "band":
                         pass
                     elif out and out[0] == "delta":
                         arena.move(out[1], out[2], now)
                     elif out:
                         arena.place(out[1], out[2], now)
+                elif kind == "move":
+                    if mapping.mode == "band" and not claw.on:
+                        arena.move(a, b, now)
                 elif kind == "btn" and claw.on:
                     if b == "press":
                         claw_fist(C.BUTTON_FOR_SIDE[a], now)
@@ -505,7 +525,7 @@ def main():
             col = BUTTON_COLOR[want]
             pygame.draw.circle(screen, col, (tx, ty), r, 4)
             pygame.draw.circle(screen, col, (tx, ty), 5)
-            text(f"{want} click ({SIDE_FOR_BUTTON[want]} fist)", (tx - r, ty + r + 6), col)
+            text(f"{want} click ({SIDE_FOR_BUTTON[want]} {word})", (tx - r, ty + r + 6), col)
 
             if len(arena.trail) > 1:
                 pygame.draw.lines(screen, (70, 76, 92), False, list(arena.trail), 2)
@@ -546,10 +566,15 @@ def main():
             last = arena.times[-1] if arena.times else 0
             text(f"hits {arena.hits}   misses {arena.misses}   avg {avg:.2f} s   last {last:.2f} s",
                  (16, 12), FG, big)
+            if mapping.mode == "band":
+                text(f"[M] band: --move {args.move}, axes {args.axes} | gain x{arena.gain:.2f} "
+                     f"(= {gain_x * arena.gain:.0f} px/rad, +/- or arrows)   "
+                     f"flip x: {'on' if arena.inv_x else 'off'}  y: {'on' if arena.inv_y else 'off'}",
+                     (16, 48), DIM)
             unit = "px/s per rad" if mapping.mode == "joystick" else "px/rad"
             gx_abs = mapping.base(mapping.axes[0]) * mapping.gx
             gy_abs = mapping.base(mapping.axes[1], False) * mapping.gy
-            text(f"[M] {mapping.mode}   [A] x={mapping.axes[0]} y={mapping.axes[1]}   "
+            if mapping.mode != "band": text(f"[M] {mapping.mode}   [A] x={mapping.axes[0]} y={mapping.axes[1]}   "
                  f"x {gx_abs:.0f} / y {gy_abs:.0f} {unit} (arrows)"
                  + (f"   dead zone {math.degrees(mapping.deadzone):.1f} deg ([ ])" if mapping.mode == "joystick" else "")
                  + f"   flip x: {'on' if arena.inv_x else 'off'}  y: {'on' if arena.inv_y else 'off'}",
@@ -568,7 +593,7 @@ def main():
                      (16, 72), DIM)
 
             y = arena.h - 30 - 26 * len(sides)
-            label = "activity" if args.check else "fist p"
+            label = "activity" if args.check else f"{args.click} p"
             for s in sides:
                 bar_w = 200
                 bcol = BUTTON_COLOR[C.BUTTON_FOR_SIDE[s]]
@@ -595,21 +620,34 @@ def main():
         if mapping.span:
             print("calibrated comfortable range (deg): " + ", ".join(
                 f"{n} {math.degrees(v):.0f}" for n, v in zip(("yaw", "pitch", "roll"), mapping.span)))
-        print(f"last setting: mode={mapping.mode} axes x={mapping.axes[0]} y={mapping.axes[1]}  "
-              f"x {mapping.base(mapping.axes[0]) * mapping.gx:.0f}  y {mapping.base(mapping.axes[1], False) * mapping.gy:.0f}"
-              f"{' px/s per rad, dead zone %.1f deg' % math.degrees(mapping.deadzone) if mapping.mode == 'joystick' else ' px/rad'}"
-              f"  flip x={arena.inv_x} y={arena.inv_y}")
-        if mapping.mode == "relative" and mapping.axes in (("yaw", "pitch"), ("yaw", "roll")):
-            print("To use it in the live demo, put this in myomouse/config.py:")
-            print(f"  POINTER_Y_AXIS = {mapping.axes[1]!r}")
-            print(f"  GAIN_X = {C.GAIN_X * mapping.gx:.0f}")
-            if mapping.axes[1] == "roll":
-                print(f"  GAIN_ROLL = {C.GAIN_ROLL * mapping.gy:.0f}\n  INVERT_ROLL = {arena.inv_y != C.INVERT_ROLL}")
-            else:
-                print(f"  GAIN_Y = {C.GAIN_Y * mapping.gy:.0f}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
-            print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}")
+        if mapping.mode == "band":
+            if arena.gain != 1.0 or arena.inv_x or arena.inv_y:
+                print("To keep these settings, put this in myomouse/config.py:")
+                if table:
+                    y_gain = ("TABLE_GAIN_SLIDE", C.TABLE_GAIN_SLIDE) if args.move == "slide" else ("TABLE_GAIN_Y", C.TABLE_GAIN_Y)
+                    print(f"  TABLE_GAIN_TURN = {C.TABLE_GAIN_TURN * arena.gain:.0f}\n"
+                          f"  {y_gain[0]} = {y_gain[1] * arena.gain:.0f}")
+                    print(f"  TABLE_INVERT_X = {arena.inv_x != C.TABLE_INVERT_X}\n"
+                          f"  TABLE_INVERT_Y = {arena.inv_y != C.TABLE_INVERT_Y}")
+                else:
+                    print(f"  GAIN_X = {C.GAIN_X * arena.gain:.0f}\n  GAIN_Y = {C.GAIN_Y * arena.gain:.0f}")
+                    print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
         else:
-            print("(absolute / joystick / roll+pitch are arena-only for now: tell Claude which one felt best)")
+            print(f"last setting: mode={mapping.mode} axes x={mapping.axes[0]} y={mapping.axes[1]}  "
+                  f"x {mapping.base(mapping.axes[0]) * mapping.gx:.0f}  y {mapping.base(mapping.axes[1], False) * mapping.gy:.0f}"
+                  f"{' px/s per rad, dead zone %.1f deg' % math.degrees(mapping.deadzone) if mapping.mode == 'joystick' else ' px/rad'}"
+                  f"  flip x={arena.inv_x} y={arena.inv_y}")
+            if mapping.mode == "relative" and mapping.axes in (("yaw", "pitch"), ("yaw", "roll")):
+                print("To use it in the live demo, put this in myomouse/config.py:")
+                print(f"  POINTER_Y_AXIS = {mapping.axes[1]!r}")
+                print(f"  GAIN_X = {C.GAIN_X * mapping.gx:.0f}")
+                if mapping.axes[1] == "roll":
+                    print(f"  GAIN_ROLL = {C.GAIN_ROLL * mapping.gy:.0f}\n  INVERT_ROLL = {arena.inv_y != C.INVERT_ROLL}")
+                else:
+                    print(f"  GAIN_Y = {C.GAIN_Y * mapping.gy:.0f}\n  INVERT_Y = {arena.inv_y != C.INVERT_Y}")
+                print(f"  INVERT_X = {arena.inv_x != C.INVERT_X}")
+            else:
+                print("(absolute / joystick / roll+pitch are arena-only for now: tell Claude which one felt best)")
 
 
 if __name__ == "__main__":

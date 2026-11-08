@@ -13,11 +13,11 @@ from myomouse.pointer import Pointer
 from myomouse.record import FIST, IGNORE, TRANSITION_S, protocol
 
 
-def synth_session(side, seed=0, motion_artifacts=True):
-    """Fake a recording that follows the real protocol. Fist = strong EMG on channels 2-5."""
+def synth_session(side, seed=0, motion_artifacts=True, click="fist"):
+    """Fake a recording that follows the real protocol. Click = strong EMG on channels 2-5."""
     rng = np.random.default_rng(seed)
     emg, lab, seg = [], [], []
-    steps = [st for _, _, block in protocol(side) for st in block]
+    steps = [st for _, _, block in protocol(side, click) for st in block]
     for i, (label, dur, _) in enumerate(steps):
         n = int(dur * C.EMG_HZ)
         gain = np.full(C.N_CHANNELS, 3.0)
@@ -36,11 +36,14 @@ def synth_session(side, seed=0, motion_artifacts=True):
     return {"emg": np.concatenate(emg), "label": np.concatenate(lab), "seg": np.concatenate(seg)}
 
 
+USER = "tester"
+
+
 @pytest.fixture
 def tmp_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(C, "MODEL_DIR", tmp_path / "models")
-    C.DATA_DIR.mkdir()
+    (C.DATA_DIR / USER).mkdir(parents=True)
     return tmp_path
 
 
@@ -64,10 +67,10 @@ def test_debouncer_needs_n_in_a_row_and_hysteresis():
 def test_train_and_replay(tmp_dirs, side, monkeypatch):
     for sid in range(2):
         s = synth_session(side, seed=sid)
-        np.savez(C.DATA_DIR / f"{side}_s{sid}.npz", **s, side=side, fs=C.EMG_HZ)
-    monkeypatch.setattr("sys.argv", ["train", "--side", side])
+        np.savez(C.DATA_DIR / USER / f"{side}_s{sid}.npz", **s, side=side, fs=C.EMG_HZ)
+    monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", side, "--click", "fist"])
     train.main()
-    model = load_model(side)
+    model = load_model(USER, side)
 
     test = synth_session(side, seed=99)
     n_fists = len({g for g, l in zip(test["seg"], test["label"]) if l == FIST})
@@ -194,12 +197,13 @@ def test_train_with_camera_labels(tmp_dirs, monkeypatch):
         s = synth_session("right", seed=sid)
         t, cam_t, ratio = fake_camera(s, delay=0.0, late=0.0, stray=(0, 0))
         lab, _ = vision_labels(t, s["label"], s["seg"], cam_t, ratio, lag=0.0)
-        np.savez(C.DATA_DIR / f"right_s{sid}.npz", emg=s["emg"], label=lab, label_cue=s["label"],
+        np.savez(C.DATA_DIR / USER / f"right_s{sid}.npz", emg=s["emg"], label=lab, label_cue=s["label"],
                  seg=s["seg"], t=t, cam_t=cam_t, cam_ratio=ratio, side="right", fs=C.EMG_HZ)
     for labels in ("camera", "cue"):
-        monkeypatch.setattr("sys.argv", ["train", "--side", "right", "--labels", labels])
+        monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", "right", "--labels", labels,
+                                          "--click", "fist"])
         train.main()
-        assert load_model("right")["pipeline"] is not None
+        assert load_model(USER, "right")["pipeline"] is not None
 
 
 def test_playground_left_recolours_right_drags():
@@ -219,3 +223,166 @@ def test_playground_left_recolours_right_drags():
     assert b["rect"][1] == y - 10 + 50 and b["color"] == c0 + 1
     pg.press("left", 5, 5, 2.0)              # empty space: just a click
     assert pg.clicks == {"left": 2, "right": 1}
+
+
+# ----------------------------------------------------------------- index lift + table mode
+
+def test_index_model_trains_on_index_recordings_only(tmp_dirs, monkeypatch):
+    from myomouse.detector import model_path
+    for sid in range(2):
+        s = synth_session("right", seed=sid, click="index")
+        np.savez(C.DATA_DIR / USER / f"index_right_s{sid}.npz", **s, side="right", fs=C.EMG_HZ, click="index")
+    monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", "right", "--click", "index"])
+    train.main()
+    model = load_model(USER, "right", "index")
+    assert model["click"] == "index" and all(f.startswith("index_") for f in model["trained_on"])
+    assert not model_path(USER, "right", "fist").exists()     # the fist model is a separate file
+
+    test = synth_session("right", seed=99, click="index")
+    n = len({g for g, l in zip(test["seg"], test["label"]) if l == FIST})
+    det = FistDetector(model, "lda")
+    assert sum(det.push(x) == "press" for x in test["emg"]) == n
+
+    # fist training doesn't pick up the index recordings
+    monkeypatch.setattr("sys.argv", ["train", "--user", USER, "--side", "right", "--click", "fist"])
+    with pytest.raises(SystemExit, match="No fist recordings"):
+        train.main()
+
+
+def _hand(index_up):
+    """21 points of a hand flat on a table (y forward, z up); index raised by `index_up` radians."""
+    pts = np.zeros((21, 3))
+    for k, (mcp, tip) in enumerate(zip((5, 9, 13, 17), (8, 12, 16, 20))):
+        pts[mcp] = (k * 0.02 - 0.03, 0.08, 0)
+        a = index_up if k == 0 else 0.0
+        pts[tip] = pts[mcp] + 0.07 * np.array([0, math.cos(a), math.sin(a)])
+    return pts
+
+
+def test_index_lift_angle():
+    from myomouse.vision import index_lift_angle
+    assert index_lift_angle(_hand(0.0)) == pytest.approx(0.0, abs=1e-6)
+    assert index_lift_angle(_hand(0.6)) == pytest.approx(0.6, abs=1e-6)
+
+
+def test_vision_labels_index_lift():
+    from myomouse.vision import vision_labels
+    s = synth_session("right", click="index")
+    t, cam_t, ratio = fake_camera(s)
+    angle = np.where(ratio == 1.0, 0.7, 0.05)     # lifted vs resting, higher = clicking
+    lab, report = vision_labels(t, s["label"], s["seg"], cam_t, angle, lag=0.0, click="index")
+    assert any("index lifts timed by the camera" in r for r in report), report
+    g = int(s["seg"][np.argmax(s["label"] == FIST)])
+    idx = np.flatnonzero(s["seg"] == g)
+    t0, t1 = t[idx[0]], t[idx[-1]]
+    assert (lab[(t > t0 - 0.25) & (t < t0 + 0.2)] == 0).all()      # cued, finger still down
+    assert (lab[(t > t0 + 0.45) & (t < t1)] == FIST).all()          # visibly lifted
+
+
+def _imu(yaw=0.0, acc_world=(0.0, 0.0)):
+    """Forearm flat on the table pointing along world x rotated by yaw; gravity on z.
+    acc_world: horizontal linear acceleration (m/s^2) in world x, y."""
+    q = (math.cos(yaw / 2) * 16384, 0, 0, math.sin(yaw / 2) * 16384)
+    a_w = np.array([acc_world[0] / 9.81, acc_world[1] / 9.81, 1.0])
+    c, s_ = math.cos(yaw), math.sin(yaw)
+    a_b = np.array([[c, s_, 0], [-s_, c, 0], [0, 0, 1]]) @ a_w    # world -> band frame
+    return q, tuple(int(v) for v in a_b * 2048), (0, 0, 0)
+
+
+def test_slide_pointer_slide_forward_moves_up_and_stops():
+    from myomouse.pointer import SlidePointer as TablePointer
+    p = TablePointer()
+    for _ in range(10):
+        p.update(*_imu())                               # settle on gravity
+    xs = ys = 0.0
+    for k in range(30):                                 # push forward: accelerate, then brake
+        a = 2.0 if k < 15 else -2.0
+        dx, dy = p.update(*_imu(acc_world=(a, 0)))
+        xs, ys = xs + dx, ys + dy
+    assert ys < -50 and abs(xs) < 0.1 * abs(ys)
+    for _ in range(20):                                 # still again: cursor stops
+        dx, dy = p.update(*_imu())
+    assert abs(dx) + abs(dy) < 0.5
+
+
+def test_slide_pointer_turn_left_and_slide_left_move_left():
+    from myomouse.pointer import SlidePointer as TablePointer
+    p = TablePointer()
+    total = 0.0
+    for k in range(50):
+        dx, _ = p.update(*_imu(yaw=0.2 * k / 50))      # turn the forearm left on the table
+        total += dx
+    assert total < -0.15 * C.TABLE_GAIN_TURN
+    p = TablePointer()
+    for _ in range(10):
+        p.update(*_imu())
+    xs = 0.0
+    for k in range(30):                                 # slide left (+y when facing +x)
+        dx, _ = p.update(*_imu(acc_world=(0, 2.0 if k < 15 else -2.0)))
+        xs += dx
+    assert xs < -50
+
+
+def test_slide_pointer_ignores_noise_at_rest():
+    from myomouse.pointer import SlidePointer as TablePointer
+    rng = np.random.default_rng(0)
+    p = TablePointer()
+    moved = 0.0
+    for _ in range(500):                                # 10 s still with sensor noise
+        q, acc, gyro = _imu()
+        acc = tuple(int(v + rng.normal(0, 15)) for v in acc)   # ~0.007 g noise
+        dx, dy = p.update(q, acc, gyro)
+        moved += abs(dx) + abs(dy)
+    assert moved < 5
+
+
+def test_axis_filter():
+    from myomouse.pointer import AxisFilter
+    assert AxisFilter("x")(3.0, 4.0) == (3.0, 0.0)
+    assert AxisFilter("y")(3.0, 4.0) == (0.0, 4.0)
+    assert AxisFilter("both")(3.0, 4.0) == (3.0, 4.0)
+    f = AxisFilter("dominant")
+    assert all(f(5.0, 1.0)[1] == 0.0 for _ in range(20))          # mostly sideways: x only
+    assert f(5.0, 6.0) == (5.0, 0.0)                              # a bit more y: doesn't flicker
+    out = [f(0.5, 8.0) for _ in range(20)]                        # clearly up/down: switches to y
+    assert out[-1] == (0.0, 8.0)
+
+
+def _quat(yaw=0.0, roll=0.0, mount=0.7):
+    """Forearm flat along world x turned by yaw; band strapped on with an arbitrary `mount` roll."""
+    def q(axis, a):
+        return np.array([math.cos(a / 2), *(math.sin(a / 2) * np.array(axis))])
+
+    def mul(a, b):
+        w1, x1, y1, z1 = a
+        w2, x2, y2, z2 = b
+        return np.array([w1*w2 - x1*x2 - y1*y2 - z1*z2, w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                         w1*y2 - x1*z2 + y1*w2 + z1*x2, w1*z2 + x1*y2 - y1*x2 + z1*w2])
+    return tuple(mul(q((0, 0, 1), yaw), q((1, 0, 0), roll + mount)) * 16384)
+
+
+def test_table_pointer_turn_is_x_and_tilt_is_y():
+    from myomouse.pointer import TablePointer
+    p = TablePointer()
+    sx = sy = 0.0
+    for k in range(50):                                 # turn left on the table
+        dx, dy = p.update(_quat(yaw=0.2 * k / 50))
+        sx, sy = sx + dx, sy + dy
+    assert sx < -0.15 * C.TABLE_GAIN_TURN and abs(sy) < 1.0
+    p = TablePointer()
+    sx = sy = 0.0
+    for k in range(50):                                 # tilt the hand, no turning
+        dx, dy = p.update(_quat(roll=0.3 * k / 50))
+        sx, sy = sx + dx, sy + dy
+    assert abs(sy) > 0.2 * C.TABLE_GAIN_Y and abs(sx) < 1.0
+
+
+def test_table_pointer_still_hand_does_not_drift():
+    from myomouse.pointer import TablePointer
+    rng = np.random.default_rng(0)
+    p = TablePointer()
+    x = y = 0.0
+    for _ in range(500):                                # 10 s still, tiny orientation noise
+        dx, dy = p.update(_quat(yaw=rng.normal(0, 0.0003), roll=rng.normal(0, 0.0003)))
+        x, y = x + dx, y + dy
+    assert abs(x) < 3 and abs(y) < 3                    # cursor ends where it started (pixels)

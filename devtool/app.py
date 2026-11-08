@@ -2,7 +2,7 @@
 
     python -m devtool --user dylan                  # both bands (needs bands.json from myomouse.identify)
     python -m devtool --user dylan --sides right    # one band
-    python -m devtool --fake                        # no hardware: hold L / R to squeeze
+    python -m devtool --user test --fake            # no hardware: hold L / R to squeeze
 
 Modes:   1 live view    2 calibrate    3 click-target test    4 fatigue protocol (raw EMG for replay)
 Keys:    Up/Down threshold    Left/Right refractory    [ ] cursor smoothing
@@ -21,6 +21,11 @@ import time
 from collections import deque
 
 import numpy as np
+
+if __package__ in (None, ""):  # run as a file (e.g. VS Code Run button) rather than `python -m devtool`
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "devtool"
 
 from myomouse import config as MC
 
@@ -41,7 +46,7 @@ TRACE_S = 2.0
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--user", default="default", help="calibration + session files are saved per user")
+    ap.add_argument("--user", required=True, help="calibration + session files are saved per user, e.g. --user julius")
     ap.add_argument("--sides", default=None,
                     help="e.g. 'right' for one band; default = the bands in bands.json")
     ap.add_argument("--fake", action="store_true", help="simulated bands; hold L / R keys to squeeze")

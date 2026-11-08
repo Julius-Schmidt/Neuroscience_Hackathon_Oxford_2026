@@ -1,13 +1,23 @@
 # MyoMouse: control a mouse with two Myo armbands
 
-- **Right band:** forearm pointing (IMU orientation) moves the cursor, fist = **left click** (hold = drag)
-- **Left band:** fist = **right click**
+- **Right band:** moves the cursor, click gesture = **left click** (hold = drag)
+- **Left band:** click gesture = **right click**
+
+Pick the style with `--click` and `--move` (the `--move` default is `MOVE` in [config.py](myomouse/config.py)):
+
+| | default | alternative |
+|---|---|---|
+| `--move` | `table`: forearm on the table. Turn the forearm = left/right, tilt the hand onto its side = up/down (`TABLE_Y = "pitch"`: lift the hand instead). Orientation only, so it doesn't drift | `air`: point the forearm in 3D (yaw/pitch); `slide`: slide on the table, measured with the accelerometer (experimental, drifts) |
+| `--click` | `fist`: squeeze a fist | `index`: lift the index finger off the table (**experimental, not reliable**: only used when you pass `--click index`, never the default) |
+
+Each click gesture has its own recordings and model (`fist_<side>` / `index_<side>`), so you can
+train both and switch with a flag. The original setup is `--move air` (with the default fist).
 
 ```
-Band R ──▶ process 1: orientation → cursor speed
-       └─▶ EMG → fist classifier R ─┐
-                                    ├─▶ mouse controller (main process) ─▶ OS
-Band L ──▶ process 2: EMG → fist classifier L ─┘
+Band R ──▶ process 1: IMU (table / air) → cursor speed
+       └─▶ EMG → click classifier R (fist / index) ─┐
+                                                    ├─▶ mouse controller (main process) ─▶ OS
+Band L ──▶ process 2: EMG → click classifier L ─────┘
 ```
 
 Each band runs in its own process and connects over the computer's built-in Bluetooth
@@ -34,41 +44,57 @@ Close Myo Connect and any other script using the bands first: a band only accept
 python -m myomouse.identify            # each band vibrates, you say which arm -> bands.json
 python -m myomouse.run --check --dry-run  # no model needed: EMG rate (~200 Hz) + muscle activity bars
 python -m myomouse.run --check            # same, and the right band moves the cursor (tune gain/invert)
-python -m myomouse.record --side right # ~2 min, follow the cues (webcam watches your hand)
-python -m myomouse.record --side left
-python -m myomouse.train  --side right # prints accuracy + "caught X/Y fists, Z false clicks"
-python -m myomouse.train  --side left
-python -m myomouse.run --dry-run --show   # watch live fist probabilities, no mouse control
-python -m myomouse.arena                  # practice: move a cursor + hit targets (real mouse untouched)
-python -m myomouse.run                    # the live demo + playground window (Esc / Ctrl+C to stop)
+python -m myomouse.record --user julius --side right # ~2 min, follow the cues (webcam watches your hand)
+python -m myomouse.record --user julius --side left
+python -m myomouse.train  --user julius --side right # prints accuracy + "caught X/Y fists, Z false clicks"
+python -m myomouse.train  --user julius --side left
+python -m myomouse.run --user julius --dry-run --show   # watch live click probabilities, no mouse control
+python -m myomouse.arena --user julius    # practice: move a cursor + hit targets (real mouse untouched)
+python -m myomouse.run --user julius      # the live demo + playground window (Esc / Ctrl+C to stop)
 python -m myomouse.off                    # let the bands sleep again (--deep powers them off)
 ```
 
+All of `record`, `train`, `run` and `arena` take `--click fist|index` (default `fist`); `record`,
+`run` and `arena` also take `--move table|air|slide`. To try the experimental index lift, pass
+`--click index` to every step (`record`, `train`, `run` / `arena`): it has its own recordings and
+model, so it never mixes with the fist ones. Add `--move air` for the 3D pointing.
+`record --move` only changes the instructions, so you practise the same movement you'll use live (the classifier must learn that it isn't a click).
+
+- **Users:** every recording and model belongs to one user, so `record`, `train`, `run`,
+  `arena` and `devtool` need `--user <name>` (only `--check` works without it).
+  Recordings go to `data/<user>/`, models to `models/<user>/fist_<side>.joblib`, and `train`
+  only uses that user's recordings. A new person records + trains under their own name.
 - **Camera labels:** while you record, the webcam (MediaPipe hand tracking) checks when your
-  hand *actually* closed and opened, and the fist labels follow that instead of the cue timing
+  hand *actually* closed and opened (fist), or when your index finger *actually* lifted (angle
+  between the index and the middle/ring fingers), and the labels follow that instead of the cue timing
   (your reaction time, holding too long, a fist while you should relax). Put the laptop so it
   sees the hand of the arm you're recording. The camera window shows the instructions and cues;
   SPACE there starts each part, ESC quits. If the window says it sees the wrong hand, use
   `--swap-hands`. Where the camera can't tell, those bits are left out or keep the cue timing.
   It's only used for training: `run` controls the mouse with the Myo bands alone.
   `--no-camera` records the old way; `train --labels cue` trains without the camera labels,
-  so you can compare the "caught X/Y fists, Z false clicks" lines.
+  so you can compare the "caught X/Y ..., Z false clicks" lines. For the index, put the camera
+  so it sees the hand from the side/front: a lifted finger is hard to see from straight above.
+  **Which camera:** `VISION_CAMERA` in [config.py](myomouse/config.py) (now `"web camera"`, the
+  external one; `""` = built-in). Override per run with `--camera "web camera"` or `--camera 0`;
+  `python -m myomouse.record --list-cameras` shows them all and which one is used.
   Settings: `VISION_*` in [config.py](myomouse/config.py).
 - **Playground (`run`):** the bands move the real mouse, and a window shows the cursor trail,
   every click (blue ripple = left, orange = right), which buttons are held, live fist
   probabilities and an event log. Left-click a block to change its colour; hold the right
-  button (left fist) on a block to drag it. Works anywhere else on the desktop too.
+  button (left hand's click) on a block to drag it. Works anywhere else on the desktop too.
   `--no-window` = terminal only; `--dry-run` = window draws its own cursor, real mouse untouched.
 - **Different demo user:** re-record and re-train both arms. Recording more sessions for the
-  same person adds to the training data, because `train` uses every `data/<side>_*.npz`.
-- **If the classifier misbehaves:** `python -m myomouse.run --mode threshold` uses a simple
+  same person adds to the training data, because `train` uses every recording of that gesture
+  (`data/<user>/index_<side>_*.npz` or `data/<user>/<side>_*.npz` for the fist).
+- **If the classifier misbehaves:** `python -m myomouse.run --user julius --mode threshold` uses a simple
   calibrated activation threshold instead.
-- **One band only:** `python -m myomouse.run --sides right`.
-- **Practice / tuning the cursor:** `python -m myomouse.arena` opens a window with its own cursor
-  and targets (blue = right fist, orange = left fist). `+`/`-` change the gain and `X`/`Y` flip
+- **One band only:** `python -m myomouse.run --user julius --sides right`.
+- **Practice / tuning the cursor:** `python -m myomouse.arena --user julius` opens a window with its own cursor
+  and targets (blue = right hand, orange = left hand). `+`/`-` change the gain and `X`/`Y` flip
   directions live; on exit it prints the values to paste into `config.py`. Before training,
   use `--check` (cursor only, Space/Enter click).
-- **No hardware:** `python -m myomouse.run --fake --dry-run` (needs trained models).
+- **No hardware:** `python -m myomouse.run --user julius --fake --dry-run` (needs trained models).
 
 ## How it stays fast
 
@@ -85,8 +111,14 @@ The cursor freezes for 150 ms around each press/release so clenching doesn't mov
 
 ## Tuning ([myomouse/config.py](myomouse/config.py))
 
-- **Cursor too slow/fast:** `GAIN_X`, `GAIN_Y`
-- **Cursor goes the wrong way:** `INVERT_X`, `INVERT_Y`
+- **Cursor too slow/fast:** `GAIN_X`, `GAIN_Y` (air), `TABLE_GAIN_TURN`, `TABLE_GAIN_SLIDE` (table)
+- **Cursor goes the wrong way:** `INVERT_X`, `INVERT_Y` (air), `TABLE_INVERT_X`, `TABLE_INVERT_Y` (table)
+- **Table: up/down too slow/fast:** `TABLE_GAIN_Y`; tilting feels wrong: `TABLE_Y = "pitch"` (lift the hand).
+- **Slide mode drifting after you stop:** lower `TABLE_LEAK`, raise `TABLE_ACC_DEADZONE_G`;
+  **sliding barely moves it:** raise `TABLE_GAIN_SLIDE`, lower `TABLE_STILL_N`.
+- **Lock to one axis:** `AXES` / `--axes` (default `both` = free; `dominant` = only along the axis you're
+  moving more right now, makes paths blocky; `x` or `y` = only that axis). `AXES_SWITCH` = how much stronger the
+  other axis must be to take over.
 - **Jittery cursor:** raise `DEADZONE_RAD` or `SMOOTHING`
 - **Clicks too slow:** lower `N_ON` or `WINDOW`
 - **False clicks:** raise `P_ON` / `N_ON`, and record more "relax while moving" data

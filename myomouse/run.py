@@ -1,14 +1,17 @@
 """Live demo: one process per band, a mouse controller in the main process.
 
-    python -m myomouse.run                  # both bands, LDA classifiers, playground window
-    python -m myomouse.run --no-window      # same, terminal only
-    python -m myomouse.run --mode threshold # fallback: simple activation threshold
-    python -m myomouse.run --dry-run        # print events instead of moving the mouse
-    python -m myomouse.run --fake --dry-run # no hardware needed
-    python -m myomouse.run --check          # before training: EMG rate, muscle activity, cursor only
+    python -m myomouse.run --user julius                  # both bands, julius's models, playground window
+    python -m myomouse.run --user julius --move air       # the original: point in 3D, fist = click
+    python -m myomouse.run --user julius --click index    # experimental: lift the index finger to click
+    python -m myomouse.run --user julius --axes x         # cursor only moves left/right (also: y, both, dominant)
+    python -m myomouse.run --user julius --no-window      # same, terminal only
+    python -m myomouse.run --user julius --mode threshold # fallback: simple activation threshold
+    python -m myomouse.run --user julius --dry-run        # print events instead of moving the mouse
+    python -m myomouse.run --user julius --fake --dry-run # no hardware needed
+    python -m myomouse.run --check          # before training (no model, so no --user): EMG rate, activity, cursor
 
-Band R --> gyro/orientation -> cursor;  EMG -> fist -> left button (hold = drag)
-Band L --> EMG -> fist -> right button
+Band R --> IMU -> cursor (--move table: hand on the table / air: pointing);  EMG -> click -> left button (hold = drag)
+Band L --> EMG -> click -> right button        (click = fist; --click index: lift the index finger, experimental)
 The playground window (playground.py) shows the cursor trail, every click, and blocks to
 recolour (left click) and drag (right button). The bands move the real mouse either way.
 Ctrl+C (or Esc in the window) to stop - always releases any held button.
@@ -22,9 +25,11 @@ import time
 from collections import deque
 
 from . import config as C
+from .gestures import DEFAULT_CLICK, WORD, add_style_args
+from .users import add_user_arg, require_user
 
 
-def band_worker(side, mode, pointer, fake, q, show, check):
+def band_worker(user, side, mode, pointer, fake, q, show, check, click, move, axes):
     """Runs in its own process: reads one band, sends ('move'|'btn'|'p', ...) to the queue."""
     from collections import deque
 
@@ -33,12 +38,13 @@ def band_worker(side, mode, pointer, fake, q, show, check):
     from .detector import FistDetector, load_model
     from .device import open_band
     from .features import envelope
-    from .pointer import Pointer, roll_angle, yaw_pitch
+    from .pointer import AxisFilter, make_pointer, roll_angle, yaw_pitch
 
-    det = None if check else FistDetector(load_model(side), mode)
+    det = None if check else FistDetector(load_model(user, side, click), mode)
     recent = deque(maxlen=C.WINDOW)  # for the activity bar in --check mode
     band = open_band(side, fake=fake, seed=1 if side == "right" else 2)
-    ptr = Pointer(pointer if isinstance(pointer, str) else None) if pointer else None
+    ptr = make_pointer(move) if pointer else None
+    only = AxisFilter(axes)
     last_show = [0.0]
 
     def on_emg(sample):
@@ -56,11 +62,11 @@ def band_worker(side, mode, pointer, fake, q, show, check):
                 value = min(1.0, envelope(np.array(recent)) / 4.0) if len(recent) > 1 else 0.0
             q.put(("p", side, value, 0.0))
 
-    def on_imu(quat):
-        dx, dy = ptr.update(quat)
+    def on_imu(quat, acc, gyro):
+        dx, dy = only(*ptr.update(quat, acc, gyro))
         if dx or dy:
             q.put(("move", dx, dy, time.perf_counter()))
-        # raw forearm angles too, so the arena can try other mappings live (run ignores these)
+        # raw forearm angles too, so the arena can try other mappings live (the controller ignores them)
         yaw, pitch = yaw_pitch(quat)
         q.put(("ori", (yaw, pitch, roll_angle(quat)), None, time.perf_counter()))
 
@@ -84,23 +90,29 @@ def band_worker(side, mode, pointer, fake, q, show, check):
         band.stop()
 
 
-def start_bands(sides, mode, fake, show, check, y_axis=None):
-    """Check bands.json / models exist, then start one process per band. Returns (queue, procs)."""
+def start_bands(user, sides, mode, fake, show, check, click=DEFAULT_CLICK, move=C.MOVE, axes=C.AXES):
+    """Check bands.json / the user's models exist, then start one process per band. Returns (queue, procs)."""
     if not fake and not C.BANDS_FILE.exists():
         raise SystemExit("No bands.json yet. Run `python -m myomouse.identify` first.")
     if not check:
         from .detector import model_path
-        missing = [s for s in sides if not model_path(s).exists()]
+        missing = [s for s in sides if not model_path(user, s, click).exists()]
         if missing:
+            from .users import known_users
+            others = ", ".join(known_users()) or "none yet"
+            other = "fist" if click == "index" else "index"
+            have_other = [s for s in sides if model_path(user, s, other).exists()]
+            hint = f"  ({user} has {other} models: add --click {other} to use them)\n" if have_other else ""
             raise SystemExit(
-                f"No trained model for: {', '.join(missing)}.\n"
-                "  Train first:  python -m myomouse.record --side <side>  then  python -m myomouse.train --side <side>\n"
+                f"No trained {click} model for {user}: {', '.join(missing)} (users with models: {others}).\n"
+                + hint +
+                f"  Train first:  python -m myomouse.record --user {user} --side <side> --click {click}"
+                f"  then  python -m myomouse.train --user {user} --side <side> --click {click}\n"
                 "  Or test the bands without a model:  python -m myomouse.run --check --dry-run")
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=band_worker, daemon=True,
-                         args=(s, mode, (y_axis or C.POINTER_Y_AXIS) if s == C.POINTER_SIDE else None,
-                               fake, q, show, check))
+                         args=(user, s, mode, s == C.POINTER_SIDE, fake, q, show, check, click, move, axes))
              for s in sides]
     for p in procs:
         p.start()
@@ -154,8 +166,9 @@ class Mouse:
 class Controller:
     """Turns band messages into mouse actions. Also keeps what the playground window shows."""
 
-    def __init__(self, mouse, sides, print_probs):
+    def __init__(self, mouse, sides, print_probs, click=DEFAULT_CLICK):
         self.mouse = mouse
+        self.word = WORD[click]
         self.freeze_until = 0.0
         self.probs = {s: 0.0 for s in sides}
         self.print_probs = print_probs
@@ -173,7 +186,7 @@ class Controller:
             self.freeze_until = now + C.FREEZE_MS / 1000
             self.lat.append((now - t_sent) * 1000)
             self.events.append(("btn", a, b))
-            print(f"{a:5s} fist {b:7s} -> {name} button  (queue {self.lat[-1]:.2f} ms)", flush=True)
+            print(f"{a:5s} {self.word} {b:7s} -> {name} button  (queue {self.lat[-1]:.2f} ms)", flush=True)
         elif kind == "p":
             self.probs[a] = b
             if self.print_probs:
@@ -190,55 +203,39 @@ class Controller:
         return out
 
 
-def add_pointer_args(ap):
-    ap.add_argument("--y-axis", choices=["pitch", "roll"], default=None,
-                    help="pitch = raise/lower the arm (default); roll = arm resting on a table, rotate the forearm")
-    ap.add_argument("--pointer", choices=["right", "left"], default=None,
-                    help="which band moves the cursor (default: config POINTER_SIDE)")
-    ap.add_argument("--button", choices=["left", "right"], default=None,
-                    help="one band only: which mouse button its fist presses")
-
-
-def apply_pointer_args(args):
-    """CLI overrides for config, applied in the main process (band processes get y_axis passed in)."""
-    if args.pointer:
-        C.POINTER_SIDE = args.pointer
-    if args.button:
-        sides = [s.strip() for s in args.sides.split(",") if s.strip()]
-        if len(sides) == 1:
-            C.BUTTON_FOR_SIDE = dict(C.BUTTON_FOR_SIDE, **{sides[0]: args.button})
-
-
 def main():
     ap = argparse.ArgumentParser()
+    add_user_arg(ap, required=False)
+    add_style_args(ap)
     ap.add_argument("--mode", choices=["lda", "threshold"], default="lda")
     ap.add_argument("--sides", default=None,
-                    help="e.g. 'right' for one band; default = the bands in bands.json")
+                    help="e.g. 'right' to run one band only; default = the bands in bands.json")
     ap.add_argument("--dry-run", action="store_true", help="don't touch the real mouse")
     ap.add_argument("--fake", action="store_true", help="simulated bands")
-    ap.add_argument("--show", action="store_true", help="print live fist probabilities")
+    ap.add_argument("--show", action="store_true", help="print live click probabilities")
     ap.add_argument("--check", action="store_true",
                     help="no classifier: show EMG rate + muscle activity and move the cursor (use before training)")
     ap.add_argument("--no-window", action="store_true", help="no playground window, terminal only")
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = forever)")
-    add_pointer_args(ap)
     args = ap.parse_args()
+    if not args.check:
+        require_user(ap, args)
     from .device import default_sides
     args.sides = args.sides or default_sides(args.fake)
-    apply_pointer_args(args)
 
     sides = [s.strip() for s in args.sides.split(",") if s.strip()]
     if args.check:
         args.show = True
     window = not args.no_window
     # the window shows the probability bars, so the bands always send them then
-    q, procs = start_bands(sides, args.mode, args.fake, args.show or window, args.check, args.y_axis)
+    q, procs = start_bands(args.user, sides, args.mode, args.fake, args.show or window, args.check,
+                           args.click, args.move, args.axes)
 
-    ctrl = Controller(Mouse(args.dry_run), sides, print_probs=args.show and not window)
+    ctrl = Controller(Mouse(args.dry_run), sides, print_probs=args.show and not window, click=args.click)
     t_start = time.perf_counter()
     label = "check (no classifier, bars = muscle activity)" if args.check else args.mode
-    print(f"mode={label} sides={sides} pointer={C.POINTER_SIDE} ({args.y_axis or C.POINTER_Y_AXIS}) "
-          f"buttons={C.BUTTON_FOR_SIDE} dry_run={args.dry_run}")
+    print(f"user={args.user or '-'} click={args.click} move={args.move} axes={args.axes} mode={label} sides={sides} "
+          f"pointer={C.POINTER_SIDE} dry_run={args.dry_run}")
     stop = threading.Event()
 
     def consume():
