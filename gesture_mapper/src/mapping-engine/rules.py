@@ -70,6 +70,7 @@ ACTIONS = {
     "type_text":   {"label": "type",                "params": {"text": "hello"}},
     "shortcut":    {"label": "press shortcut",      "params": {"keys": "ctrl+c"}},
     "command":     {"label": "run built-in command", "params": {"name": "OpenSpotlight"}},
+    "command_hold": {"label": "hold built-in command", "params": {"name": "HoldBreak"}},
     "open":        {"label": "open app / file / website", "params": {"target": "https://www.bbc.co.uk"}},
     "set_mode":    {"label": "set mode to",         "params": {"value": "normal"}},
     "toggle_mode": {"label": "toggle mode between", "params": {"a": "normal", "b": "paused"}},
@@ -81,7 +82,8 @@ ACTIONS = {
 # event names each source can produce (the editor's dropdowns); free text is allowed too
 SOURCE_EVENTS = {
     "camera": [f"{h}.{g}" for h in ("left", "right") for g in
-               ("fist", "open_palm", "peace", "index_pointer", "thumbs_up", "pinch_index", "pinch_middle")],
+               ("fist", "open_palm", "peace", "index_pointer", "thumbs_up", "shaaa",
+                "pinch_index", "pinch_middle", "pinch_ring", "pinch_pinky")],
     "myo": [f"{s}.{g}" for s in ("right", "left") for g in
             ("fist", "index", "wave_in", "wave_out", "fingers_spread", "double_tap")]
            + ["right.pointer", "left.pointer"],
@@ -223,7 +225,7 @@ class RuleEngine:
                 self.set_mode(str(a.get("value", "normal")))
             elif t == "toggle_mode":
                 self.set_mode(a.get("b") if self.mode == a.get("a") else a.get("a"))
-            elif t in ("key_hold", "mouse_hold"):
+            elif t in ("key_hold", "mouse_hold", "command_hold"):
                 self._safe(self.executor.press, a)
                 if hold:
                     self._held.setdefault(ev.key, []).append(a)

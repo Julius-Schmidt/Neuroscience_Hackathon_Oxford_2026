@@ -144,14 +144,28 @@ class OSExecutor:
     def __init__(self):
         self.messages = []
 
+    @staticmethod
+    def _cmd(a):
+        from commands import by_name
+        import executor
+        return executor, by_name(str(a.get("name", "")))
+
     def press(self, a: dict) -> None:
-        if a["type"] == "key_hold":
+        if a["type"] == "command_hold":
+            ex, cmd = self._cmd(a)
+            if cmd:
+                (ex.hold if cmd.mode == "held" else ex.tap)(cmd)
+        elif a["type"] == "key_hold":
             _key(a.get("key", "w"), True)
         elif a["type"] == "mouse_hold":
             _mouse(a.get("button", "left"), True)
 
     def release(self, a: dict) -> None:
-        if a["type"] == "key_hold":
+        if a["type"] == "command_hold":
+            ex, cmd = self._cmd(a)
+            if cmd and cmd.mode == "held":
+                ex.release(cmd)
+        elif a["type"] == "key_hold":
             _key(a.get("key", "w"), False)
         elif a["type"] == "mouse_hold":
             _mouse(a.get("button", "left"), False)

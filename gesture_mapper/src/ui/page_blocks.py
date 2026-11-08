@@ -36,8 +36,8 @@ from widgets import make_label  # noqa: E402
 
 MIME = "application/x-neuratect-block"
 
-# Scratch's own category colours, so it reads as "blocks" at a glance
-C_EVENT, C_COND, C_INPUT, C_CONTROL, C_APP = "#ffbf00", "#59c059", "#4c97ff", "#ffab19", "#9966ff"
+# category colours from the app's own (Apple dark-mode) palette
+C_EVENT, C_COND, C_INPUT, C_CONTROL, C_APP = theme.ORANGE, theme.GREEN, theme.ACCENT, theme.TEAL, theme.PURPLE
 
 SOURCE_LABELS = {"myo": "Myo band", "camera": "camera pose", "lsl": "BCI / EEG marker", "keyboard": "test key"}
 TRIGGER_SHORT = {"press": "starts", "release": "ends", "hold": "is held", "value": "moves"}
@@ -54,6 +54,7 @@ PALETTE = [
     ("Control", C_CONTROL, [("act:set_mode", "set mode to"), ("act:toggle_mode", "toggle mode"),
                             ("act:wait", "wait")]),
     ("Apps & feedback", C_APP, [("act:open", "open app / website"), ("act:command", "built-in command"),
+                                ("act:command_hold", "hold built-in command"),
                                 ("act:sound", "play sound"), ("act:say", "show message")]),
 ]
 ACTION_COLOR = {k.split(":")[1]: c for _cat, c, items in PALETTE for k, _ in items if k.startswith("act:")}
@@ -66,64 +67,45 @@ def _darker(hex_color: str, f=130) -> str:
     return QColor(hex_color).darker(f).name()
 
 
-HAT_TOP = 10      # extra height of a hat block's dome
-NOTCH = 4         # depth of the Scratch notch on a block's top edge
+HAT_TOP = 0       # kept for layout maths; modern blocks have no dome / notch
+NOTCH = 0
 
 
-def block_path(w: float, h: float, hat: bool = False) -> QPainterPath:
-    """Scratch-like block outline: rounded corners, a notch near the top-left (where the block
-    above would click in), and a dome on top for 'when' hat blocks."""
-    rad = 7.0
-    path = QPainterPath()
-    if hat:
-        top = HAT_TOP
-        path.moveTo(0, top + rad)
-        path.cubicTo(0, -2, 78, -4, 96, top)          # the dome
-        path.lineTo(w - rad, top)
-        path.quadTo(w, top, w, top + rad)
-    else:
-        path.moveTo(0, rad)
-        path.quadTo(0, 0, rad, 0)
-        path.lineTo(14, 0)
-        path.lineTo(18, NOTCH)
-        path.lineTo(30, NOTCH)
-        path.lineTo(34, 0)
-        path.lineTo(w - rad, 0)
-        path.quadTo(w, 0, w, rad)
-    path.lineTo(w, h - rad)
-    path.quadTo(w, h, w - rad, h)
-    path.lineTo(rad, h)
-    path.quadTo(0, h, 0, h - rad)
-    path.closeSubpath()
-    return path
+def _mix(a: str, b: str, t: float) -> QColor:
+    """Blend colour a towards b by t (0..1)."""
+    ca, cb = QColor(a), QColor(b)
+    return QColor(int(ca.red() + (cb.red() - ca.red()) * t), int(ca.green() + (cb.green() - ca.green()) * t),
+                  int(ca.blue() + (cb.blue() - ca.blue()) * t))
 
 
 def paint_block(widget, color: str, hat: bool = False) -> None:
+    """A block = a dark card tinted with its category colour and a coloured accent bar on the
+    left. 'when' blocks get a stronger tint so a rule's trigger stands out."""
     p = QPainter(widget)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    w, h = widget.width() - 1, widget.height() - 2
-    path = block_path(w, h, hat)
-    base = QColor(color)
-    g = QLinearGradient(0, 0, 0, h)
-    g.setColorAt(0.0, base.lighter(112))
-    g.setColorAt(1.0, base)
-    p.translate(0.5, 1.5)                              # 1px "shadow" under the block
-    p.fillPath(path, QColor(0, 0, 0, 70))
-    p.translate(0, -1.0)
-    p.fillPath(path, QBrush(g))
-    p.setPen(QPen(base.darker(135), 1.0))
+    rect = QRectF(0.5, 0.5, widget.width() - 1, widget.height() - 1)
+    path = QPainterPath()
+    path.addRoundedRect(rect, 10, 10)
+    p.fillPath(path, _mix(theme.CARD, color, 0.26 if hat else 0.15))
+    p.setPen(QPen(_mix(theme.CARD_BORDER, color, 0.55 if hat else 0.4), 1.0))
     p.drawPath(path)
+    p.setClipPath(path)
+    p.fillRect(QRectF(0, 0, 5 if hat else 4, widget.height()), QColor(color))
     p.end()
 
 
 def _block_qss(color: str) -> str:
+    field = (f"background: {theme.FIELD}; color: {theme.TEXT}; border: 1px solid {theme.CARD_BORDER};"
+             f" border-radius: 7px; padding: 3px 8px; min-height: 20px;")
     return (f"QFrame#block {{ background: transparent; border: none; }}"
-            f"QFrame#block QLabel {{ color: white; font-weight: 600; background: transparent; }}"
-            f"QFrame#block QComboBox, QFrame#block QLineEdit, QFrame#block QSpinBox, QFrame#block QDoubleSpinBox {{"
-            f" background: white; color: #222; border: none; border-radius: 9px; padding: 2px 8px; min-height: 20px; }}"
-            f"QFrame#block QComboBox QAbstractItemView {{ background: white; color: #222; selection-background-color: {color}; }}"
-            f"QFrame#block QPushButton {{ background: transparent; border: none; color: white; padding: 0 4px; font-weight: 700; }}"
-            f"QFrame#block QPushButton:hover {{ color: #222; }}")
+            f"QFrame#block QLabel {{ color: {theme.TEXT}; font-weight: 600; background: transparent; }}"
+            f"QFrame#block QComboBox, QFrame#block QLineEdit, QFrame#block QSpinBox, QFrame#block QDoubleSpinBox {{ {field} }}"
+            f"QFrame#block QComboBox:hover, QFrame#block QLineEdit:focus {{ border: 1px solid {color}; }}"
+            f"QFrame#block QComboBox QAbstractItemView {{ background: {theme.CARD}; color: {theme.TEXT};"
+            f" selection-background-color: {color}; }}"
+            f"QFrame#block QPushButton {{ background: transparent; border: none; color: {theme.TEXT_FAINT};"
+            f" padding: 0 4px; font-weight: 700; }}"
+            f"QFrame#block QPushButton:hover {{ color: {theme.TEXT}; }}")
 
 
 class _Bridge(QObject):
@@ -145,7 +127,7 @@ class BlockWidget(QFrame):
         self.setStyleSheet(_block_qss(color))
         self.setMinimumHeight(36)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, NOTCH + 4, 6, 6)
+        lay.setContentsMargins(14, 5, 6, 5)
         lay.setSpacing(6)
         self._build(lay)
         lay.addStretch()
@@ -233,8 +215,8 @@ class BlockWidget(QFrame):
             self._lbl(lay, "press shortcut")
             self._combo(lay, "keys", ["ctrl+c", "ctrl+v", "ctrl+z", "alt+tab", "ctrl+s", "cmd+space"],
                         editable=True, width=110)
-        elif t == "command":
-            self._lbl(lay, "built-in command")
+        elif t in ("command", "command_hold"):
+            self._lbl(lay, "built-in command" if t == "command" else "hold built-in command")
             try:
                 import commands as C
                 names = sorted(C.ALL_COMMANDS)
@@ -273,9 +255,9 @@ class HatBlock(QFrame):
         super().__init__(parent)
         self.when = when
         self.setObjectName("block")
-        self.setStyleSheet(_block_qss(C_EVENT) + "QFrame#block QLabel { color: #3a2a00; }")
+        self.setStyleSheet(_block_qss(C_EVENT))
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, HAT_TOP + 7, 10, 8)
+        lay.setContentsMargins(16, 8, 10, 8)
         lay.setSpacing(6)
         lay.addWidget(QLabel("when"))
         self.src = QComboBox()
@@ -379,8 +361,8 @@ class RuleCard(QFrame):
         lay.addWidget(self.hat)
         spine = QFrame()
         spine.setObjectName("spine")
-        spine.setStyleSheet(f"QFrame#spine {{ border-left: 4px solid {_darker(C_EVENT, 160)}; "
-                            f"margin-left: 8px; }}")
+        spine.setStyleSheet(f"QFrame#spine {{ border-left: 2px solid {_mix(theme.CARD_BORDER, C_EVENT, 0.5).name()}; "
+                            f"margin-left: 10px; }}")
         self.body = QVBoxLayout(spine)
         self.body.setContentsMargins(10, 2, 0, 2)     # blocks hang under the hat, Scratch-style
         self.body.setSpacing(3)
@@ -489,10 +471,8 @@ class PaletteBlock(QLabel):
         super().__init__(text)
         self.key, self.color = key, color
         self.hat = key.startswith("hat:")
-        fg = "#3a2a00" if color == C_EVENT else "white"
-        top = (HAT_TOP if self.hat else NOTCH) + 5
-        self.setStyleSheet(f"background: transparent; color: {fg}; font-weight: 600; "
-                           f"padding: {top}px 12px 6px 12px;")
+        self.setStyleSheet(f"background: transparent; color: {theme.TEXT}; font-weight: 600; "
+                           f"padding: 7px 12px 7px 14px;")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip("click to add to the selected rule, or drag onto a rule")
         self._press = None
@@ -608,6 +588,12 @@ class BlocksPage(QWidget):
         srow.addWidget(make_label("Examples:", "dim"))
         srow.addWidget(self.preset)
         srow.addWidget(load)
+        imp = QPushButton("Import camera mappings")
+        imp.setProperty("class", "ghost")
+        imp.setToolTip("turn the Mappings page's camera bindings into rules (re-importing replaces them)")
+        imp.setCursor(Qt.CursorShape.PointingHandCursor)
+        imp.clicked.connect(self.import_camera_mappings)
+        srow.addWidget(imp)
         root.addLayout(srow)
 
         # palette | canvas
@@ -619,7 +605,7 @@ class BlocksPage(QWidget):
         pal = QWidget()
         pl = QVBoxLayout(pal)
         pl.setContentsMargins(0, 0, 8, 0)
-        pl.setSpacing(2)
+        pl.setSpacing(4)
         for cat, color, items in PALETTE:
             pl.addWidget(make_label(cat, None, 12, QFont.Weight.Bold, color))
             for key, text in items:
@@ -759,6 +745,19 @@ class BlocksPage(QWidget):
         self.sel = None
         self._rebuild()
         self.save()
+
+    def import_camera_mappings(self) -> int:
+        import import_mappings as IM
+        n = IM.import_current(self.data)
+        self.runtime.engine.set_rules(self.data)
+        self.sel = None
+        self._rebuild()
+        self.save()
+        self.status.setText(f"Imported {n} camera bindings. They run when 'Camera poses' is on here - "
+                            "don't also use Home > Start control, or they fire twice.")
+        self.status.setToolTip("The camera pointer, pinch-to-click on the pointer and the Minecraft joysticks "
+                               "stay in Home > Start control; they aren't rules.")
+        return n
 
     def _try(self, card):
         w = card.rule.get("when", {})
