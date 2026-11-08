@@ -272,6 +272,9 @@ class Engine(QObject):
     @staticmethod
     def camera_permission() -> bool | None:
         """True granted, False denied/restricted, None not yet asked."""
+        import sys as _sys
+        if _sys.platform != "darwin":
+            return True        # Windows asks for camera access itself (Settings > Privacy > Camera)
         try:
             import AVFoundation
             st = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(
@@ -284,7 +287,10 @@ class Engine(QObject):
     def input_permission() -> bool:
         """Accessibility / input-posting permission (what the executor needs)."""
         try:
-            import Quartz
+            try:
+                import Quartz
+            except ImportError:
+                from quartz_compat import Quartz
             return bool(Quartz.CGPreflightPostEventAccess())
         except Exception:
             return False
@@ -292,7 +298,10 @@ class Engine(QObject):
     @staticmethod
     def request_input_permission() -> None:
         try:
-            import Quartz
+            try:
+                import Quartz
+            except ImportError:
+                from quartz_compat import Quartz
             Quartz.CGRequestPostEventAccess()
         except Exception:
             pass

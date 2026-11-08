@@ -9,7 +9,10 @@ release(command) — release a held key/button
 """
 
 import logging
-import Quartz
+try:
+    import Quartz                      # macOS
+except ImportError:                    # Windows (and test machines): same API via Win32
+    from quartz_compat import Quartz
 try:
     from .commands import Command
 except ImportError:

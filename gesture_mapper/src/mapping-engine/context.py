@@ -9,7 +9,12 @@ is the reliable signal. CGWindowListCopyWindowInfo with kCGWindowListOptionOnScr
 returns windows front-to-back, so the first layer-0 window is the active app.
 """
 
-import Quartz
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'os-integration'))
+try:
+    import Quartz                      # macOS
+except ImportError:                    # Windows (and test machines): same API via Win32
+    from quartz_compat import Quartz
 
 _WINDOW_CONTEXTS = {
     "spotlight": "spotlight",

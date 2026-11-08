@@ -58,7 +58,13 @@ class GestureDetector:
     def open(self) -> None:
         if self._cap is not None:      # re-entrant: the GUI hands one detector
             return                     # between preview and control threads
-        self._cap = cv2.VideoCapture(self._camera_index)
+        import sys as _sys
+        if _sys.platform == "win32":   # match the index order camera.list_cameras() used
+            self._cap = cv2.VideoCapture(self._camera_index, cv2.CAP_MSMF)
+            if not self._cap.isOpened():
+                self._cap = cv2.VideoCapture(self._camera_index, cv2.CAP_DSHOW)
+        else:
+            self._cap = cv2.VideoCapture(self._camera_index)
         if not self._cap.isOpened():
             raise RuntimeError(
                 f"Could not open camera {self._camera_index}. "

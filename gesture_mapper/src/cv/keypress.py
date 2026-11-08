@@ -20,6 +20,10 @@ try:
 except ImportError:
     termios = None
     tty = None
+try:
+    import msvcrt            # Windows: read single keys without Enter
+except ImportError:
+    msvcrt = None
 
 
 class KeyListener:
@@ -40,6 +44,14 @@ class KeyListener:
         return self
 
     def _listen(self) -> None:
+        if msvcrt is not None and sys.stdin.isatty():
+            import time
+            while not self._quit.is_set():
+                if msvcrt.kbhit() and msvcrt.getwch().lower() == self._quit_key:
+                    self._quit.set()
+                    return
+                time.sleep(0.05)
+            return
         while not self._quit.is_set():
             ch = sys.stdin.read(1)
             if ch.lower() == self._quit_key:

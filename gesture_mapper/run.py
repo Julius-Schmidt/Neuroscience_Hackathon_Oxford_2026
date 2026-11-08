@@ -25,12 +25,14 @@ import logging
 import threading
 import contextlib
 from collections import deque
-import AppKit
-import Quartz
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'cv'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'mapping-engine'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'os-integration'))
+
+try:
+    import Quartz                      # macOS
+except ImportError:                    # Windows (and test machines): same API via Win32
+    from quartz_compat import Quartz
 
 from detector import GestureDetector
 from mapper import map_gesture

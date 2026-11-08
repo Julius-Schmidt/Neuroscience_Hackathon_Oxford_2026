@@ -1,4 +1,5 @@
-# Exact versions this project is known to run on (macOS, Python 3.13).
+# Exact versions this project is known to run on (macOS, Python 3.13). Windows: the pyobjc
+# lines are skipped automatically; input/window calls go through src/os-integration/quartz_compat.py.
 # Install with:  pip install -r requirements.txt
 #
 # Pinned rather than open-ended so a second machine gets the same behaviour —
@@ -12,10 +13,10 @@ cv2-enumerate-cameras==1.3.3
 numpy==2.3.5
 
 # macOS APIs: Quartz (CGEvent, window list) and AppKit come from pyobjc
-pyobjc-framework-Quartz==12.2.1
-pyobjc-framework-Cocoa==12.2.1
+pyobjc-framework-Quartz==12.2.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==12.2.1; sys_platform == "darwin"
 # AVFoundation is only used for the camera-permission status check in the GUI
-pyobjc-framework-AVFoundation==12.2.1
+pyobjc-framework-AVFoundation==12.2.1; sys_platform == "darwin"
 
 # GUI (gui.py) — PySide6 also ships the Qt runtime
 PySide6==6.9.2

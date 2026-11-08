@@ -21,7 +21,12 @@ sys.path.insert(0, os.path.join(_ROOT, 'src', 'os-integration'))
 import run
 from gesture import Gesture
 from executor import move_event_type
-import Quartz
+try:
+    import Quartz
+except ImportError:
+    import os as _o, sys as _s
+    _s.path.insert(0, _o.path.join(_o.path.dirname(__file__), '..', 'src', 'os-integration'))
+    from quartz_compat import Quartz
 
 ok = True
 def check(cond, msg):
