@@ -226,7 +226,117 @@ def _render_symbol(name: str, size: int, color: str, weight: str) -> QPixmap | N
         return None
 
 
+def _draw_vector(name: str, p: QPainter, color: str) -> bool:
+    """Simple vector icons on a 24x24 grid, for when SF Symbols aren't available
+    (Windows / Linux). Returns False for names it doesn't know."""
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QBrush, QPainterPath, QPen
+    c = QColor(color)
+    fill = QBrush(c)
+    pen = QPen(c, 2.0)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    no_pen = Qt.PenStyle.NoPen
+    if name == "house.fill":
+        path = QPainterPath()
+        path.moveTo(12, 3); path.lineTo(22, 11.5); path.lineTo(19.5, 11.5); path.lineTo(19.5, 21)
+        path.lineTo(14.5, 21); path.lineTo(14.5, 15); path.lineTo(9.5, 15); path.lineTo(9.5, 21)
+        path.lineTo(4.5, 21); path.lineTo(4.5, 11.5); path.lineTo(2, 11.5); path.closeSubpath()
+        p.setPen(no_pen); p.setBrush(fill); p.drawPath(path)
+    elif name in ("hand.raised.fill", "hand.point.up.left.fill", "hand.pinch.fill"):
+        p.setPen(no_pen); p.setBrush(fill)
+        for x, top in ((6.2, 6), (9.4, 3), (12.6, 2.5), (15.8, 4.5)):
+            p.drawRoundedRect(QRectF(x, top, 2.9, 11 - top + 3), 1.45, 1.45)
+        p.drawRoundedRect(QRectF(6.2, 11, 12.5, 10.5), 4, 4)
+        path = QPainterPath()
+        path.moveTo(18.2, 13.5); path.lineTo(20.8, 10.2); path.quadTo(22.4, 9.6, 22, 11.4)
+        path.lineTo(18.6, 17.5); path.closeSubpath()
+        p.drawPath(path)
+    elif name == "arrow.left.arrow.right":
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawLine(QPointF(4, 8), QPointF(20, 8)); p.drawLine(QPointF(16, 4), QPointF(20, 8))
+        p.drawLine(QPointF(16, 12), QPointF(20, 8))
+        p.drawLine(QPointF(4, 16), QPointF(20, 16)); p.drawLine(QPointF(8, 12), QPointF(4, 16))
+        p.drawLine(QPointF(8, 20), QPointF(4, 16))
+    elif name == "square.stack.3d.up.fill":     # Blocks: two stacked puzzle blocks
+        p.setPen(no_pen); p.setBrush(fill)
+        for y in (3.5, 13):
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(3, y, 18, 7.5), 2, 2)
+            notch = QPainterPath()
+            notch.addRect(QRectF(7, y, 4, 2))
+            p.drawPath(path.subtracted(notch))
+            p.drawRect(QRectF(7, y + 7.5, 4, 1.6))
+    elif name == "gearshape.fill":
+        p.setPen(no_pen); p.setBrush(fill)
+        p.save(); p.translate(12, 12)
+        for k in range(8):
+            p.drawRoundedRect(QRectF(-1.8, -10.5, 3.6, 5), 1, 1)
+            p.rotate(45)
+        p.restore()
+        ring = QPainterPath(); ring.addEllipse(QPointF(12, 12), 7.2, 7.2)
+        hole = QPainterPath(); hole.addEllipse(QPointF(12, 12), 3, 3)
+        p.drawPath(ring.subtracted(hole))
+    elif name == "play.fill":
+        path = QPainterPath(); path.moveTo(7, 4); path.lineTo(20, 12); path.lineTo(7, 20); path.closeSubpath()
+        p.setPen(no_pen); p.setBrush(fill); p.drawPath(path)
+    elif name == "stop.fill":
+        p.setPen(no_pen); p.setBrush(fill); p.drawRoundedRect(QRectF(5, 5, 14, 14), 2.5, 2.5)
+    elif name == "plus":
+        thick = QPen(c, 2.6); thick.setCapStyle(Qt.PenCapStyle.RoundCap); p.setPen(thick)
+        p.drawLine(QPointF(12, 5), QPointF(12, 19)); p.drawLine(QPointF(5, 12), QPointF(19, 12))
+    elif name in ("trash", "xmark.circle.fill"):
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        if name == "trash":
+            p.drawLine(QPointF(4, 6.5), QPointF(20, 6.5)); p.drawLine(QPointF(9.5, 6.5), QPointF(10.5, 3.5))
+            p.drawLine(QPointF(14.5, 6.5), QPointF(13.5, 3.5)); p.drawLine(QPointF(10.5, 3.5), QPointF(13.5, 3.5))
+            p.drawRoundedRect(QRectF(6, 6.5, 12, 14), 2, 2)
+        else:
+            p.drawEllipse(QPointF(12, 12), 9, 9)
+            p.drawLine(QPointF(9, 9), QPointF(15, 15)); p.drawLine(QPointF(15, 9), QPointF(9, 15))
+    elif name == "record.circle":
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawEllipse(QPointF(12, 12), 9, 9)
+        p.setPen(no_pen); p.setBrush(fill); p.drawEllipse(QPointF(12, 12), 4.5, 4.5)
+    elif name == "camera.fill":
+        p.setPen(no_pen); p.setBrush(fill)
+        body = QPainterPath(); body.addRoundedRect(QRectF(2.5, 7, 19, 13), 3, 3)
+        body.addRect(QRectF(8, 4.5, 8, 3))
+        lens = QPainterPath(); lens.addEllipse(QPointF(12, 13.5), 3.6, 3.6)
+        p.drawPath(body.subtracted(lens))
+    elif name in ("checkmark.circle.fill",):
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawEllipse(QPointF(12, 12), 9, 9)
+        p.drawLine(QPointF(8, 12.5), QPointF(11, 15.5)); p.drawLine(QPointF(11, 15.5), QPointF(16.5, 9))
+    elif name == "questionmark.circle":
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawEllipse(QPointF(12, 12), 9, 9)
+        f = app_font(11, QFont.Weight.Bold); p.setFont(f)
+        p.drawText(QRectF(0, 0, 24, 24), Qt.AlignmentFlag.AlignCenter, "?")
+    elif name == "arrow.right":
+        p.setPen(pen)
+        p.drawLine(QPointF(4, 12), QPointF(20, 12)); p.drawLine(QPointF(14, 6), QPointF(20, 12))
+        p.drawLine(QPointF(14, 18), QPointF(20, 12))
+    elif name in ("chevron.right", "chevron.left"):
+        p.setPen(pen)
+        a_, b_ = (9, 15) if name == "chevron.right" else (15, 9)
+        p.drawLine(QPointF(a_, 5), QPointF(b_, 12)); p.drawLine(QPointF(b_, 12), QPointF(a_, 19))
+    else:
+        return False
+    return True
+
+
 def _render_fallback(name: str, size: int, color: str) -> QPixmap:
+    pm = QPixmap(size * 2, size * 2)
+    pm.setDevicePixelRatio(2.0)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(size / 24.0, size / 24.0)          # logical units -> 24x24 design grid
+    try:
+        ok = _draw_vector(name, p, color)
+    except Exception:
+        ok = False
+    p.end()
+    if ok:
+        return pm
     glyph = _FALLBACK.get(name, "•")
     pm = QPixmap(size * 2, size * 2)
     pm.setDevicePixelRatio(2.0)

@@ -18,7 +18,8 @@ import os
 import sys
 
 from PySide6.QtCore import QMimeData, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDrag, QFont, QPainter, QPixmap
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
                                QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
@@ -65,8 +66,58 @@ def _darker(hex_color: str, f=130) -> str:
     return QColor(hex_color).darker(f).name()
 
 
+HAT_TOP = 10      # extra height of a hat block's dome
+NOTCH = 4         # depth of the Scratch notch on a block's top edge
+
+
+def block_path(w: float, h: float, hat: bool = False) -> QPainterPath:
+    """Scratch-like block outline: rounded corners, a notch near the top-left (where the block
+    above would click in), and a dome on top for 'when' hat blocks."""
+    rad = 7.0
+    path = QPainterPath()
+    if hat:
+        top = HAT_TOP
+        path.moveTo(0, top + rad)
+        path.cubicTo(0, -2, 78, -4, 96, top)          # the dome
+        path.lineTo(w - rad, top)
+        path.quadTo(w, top, w, top + rad)
+    else:
+        path.moveTo(0, rad)
+        path.quadTo(0, 0, rad, 0)
+        path.lineTo(14, 0)
+        path.lineTo(18, NOTCH)
+        path.lineTo(30, NOTCH)
+        path.lineTo(34, 0)
+        path.lineTo(w - rad, 0)
+        path.quadTo(w, 0, w, rad)
+    path.lineTo(w, h - rad)
+    path.quadTo(w, h, w - rad, h)
+    path.lineTo(rad, h)
+    path.quadTo(0, h, 0, h - rad)
+    path.closeSubpath()
+    return path
+
+
+def paint_block(widget, color: str, hat: bool = False) -> None:
+    p = QPainter(widget)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    w, h = widget.width() - 1, widget.height() - 2
+    path = block_path(w, h, hat)
+    base = QColor(color)
+    g = QLinearGradient(0, 0, 0, h)
+    g.setColorAt(0.0, base.lighter(112))
+    g.setColorAt(1.0, base)
+    p.translate(0.5, 1.5)                              # 1px "shadow" under the block
+    p.fillPath(path, QColor(0, 0, 0, 70))
+    p.translate(0, -1.0)
+    p.fillPath(path, QBrush(g))
+    p.setPen(QPen(base.darker(135), 1.0))
+    p.drawPath(path)
+    p.end()
+
+
 def _block_qss(color: str) -> str:
-    return (f"QFrame#block {{ background: {color}; border: 1px solid {_darker(color)}; border-radius: 9px; }}"
+    return (f"QFrame#block {{ background: transparent; border: none; }}"
             f"QFrame#block QLabel {{ color: white; font-weight: 600; background: transparent; }}"
             f"QFrame#block QComboBox, QFrame#block QLineEdit, QFrame#block QSpinBox, QFrame#block QDoubleSpinBox {{"
             f" background: white; color: #222; border: none; border-radius: 9px; padding: 2px 8px; min-height: 20px; }}"
@@ -89,11 +140,12 @@ class BlockWidget(QFrame):
 
     def __init__(self, data: dict, kind: str, color: str, parent=None):
         super().__init__(parent)
-        self.data, self.kind = data, kind
+        self.data, self.kind, self.color = data, kind, color
         self.setObjectName("block")
         self.setStyleSheet(_block_qss(color))
+        self.setMinimumHeight(36)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 5, 4, 5)
+        lay.setContentsMargins(12, NOTCH + 4, 6, 6)
         lay.setSpacing(6)
         self._build(lay)
         lay.addStretch()
@@ -108,6 +160,9 @@ class BlockWidget(QFrame):
         rm.setCursor(Qt.CursorShape.PointingHandCursor)
         rm.clicked.connect(lambda: self.remove.emit(self))
         lay.addWidget(rm)
+
+    def paintEvent(self, e):
+        paint_block(self, self.color)
 
     def _lbl(self, lay, text):
         lay.addWidget(QLabel(text))
@@ -220,7 +275,7 @@ class HatBlock(QFrame):
         self.setObjectName("block")
         self.setStyleSheet(_block_qss(C_EVENT) + "QFrame#block QLabel { color: #3a2a00; }")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 10, 8)
+        lay.setContentsMargins(14, HAT_TOP + 7, 10, 8)
         lay.setSpacing(6)
         lay.addWidget(QLabel("when"))
         self.src = QComboBox()
@@ -244,6 +299,9 @@ class HatBlock(QFrame):
         self.src.currentIndexChanged.connect(self._src_changed)
         self.ev.currentTextChanged.connect(self._ev_changed)
         self.trig.currentIndexChanged.connect(lambda _: self._set("trigger", self.trig.currentData()))
+
+    def paintEvent(self, e):
+        paint_block(self, C_EVENT, hat=True)
 
     def _fill_events(self):
         cur = self.when.get("name", "")
@@ -319,10 +377,14 @@ class RuleCard(QFrame):
         self.hat = HatBlock(rule.setdefault("when", {"source": "myo", "name": "right.fist", "trigger": "press"}))
         self.hat.changed.connect(self.changed)
         lay.addWidget(self.hat)
-        self.body = QVBoxLayout()
-        self.body.setContentsMargins(18, 0, 0, 0)    # blocks sit inside the hat, Scratch-style
-        self.body.setSpacing(4)
-        lay.addLayout(self.body)
+        spine = QFrame()
+        spine.setObjectName("spine")
+        spine.setStyleSheet(f"QFrame#spine {{ border-left: 4px solid {_darker(C_EVENT, 160)}; "
+                            f"margin-left: 8px; }}")
+        self.body = QVBoxLayout(spine)
+        self.body.setContentsMargins(10, 2, 0, 2)     # blocks hang under the hat, Scratch-style
+        self.body.setSpacing(3)
+        lay.addWidget(spine)
         self.hint = make_label("drop or click blocks to add them here", "faint")
         self.hint.setContentsMargins(20, 2, 0, 0)
         lay.addWidget(self.hint)
@@ -425,15 +487,19 @@ class PaletteBlock(QLabel):
 
     def __init__(self, key, text, color):
         super().__init__(text)
-        self.key = key
-        hat = key.startswith("hat:")
+        self.key, self.color = key, color
+        self.hat = key.startswith("hat:")
         fg = "#3a2a00" if color == C_EVENT else "white"
-        radius = "14px 14px 9px 9px" if hat else "9px"
-        self.setStyleSheet(f"background: {color}; color: {fg}; font-weight: 600; padding: 6px 10px;"
-                           f"border: 1px solid {_darker(color)}; border-radius: {radius.split()[0]};")
+        top = (HAT_TOP if self.hat else NOTCH) + 5
+        self.setStyleSheet(f"background: transparent; color: {fg}; font-weight: 600; "
+                           f"padding: {top}px 12px 6px 12px;")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip("click to add to the selected rule, or drag onto a rule")
         self._press = None
+
+    def paintEvent(self, e):
+        paint_block(self, self.color, self.hat)
+        super().paintEvent(e)
 
     def mousePressEvent(self, e):
         self._press = e.position().toPoint()
@@ -490,20 +556,17 @@ class BlocksPage(QWidget):
                          "changes save and apply instantly.", "dim")
         sub.setWordWrap(True)
         col.addWidget(sub)
-        head.addLayout(col)
-        head.addStretch()
+        head.addLayout(col, stretch=1)
         import presets
         self._presets = presets
         self.preset = QComboBox()
         for k, v in presets.TITLES.items():
             self.preset.addItem(v, k)
         self.preset.setStyleSheet(self._bar_qss)
-        head.addWidget(self.preset)
         load = QPushButton("Load example")
         load.setProperty("class", "ghost")
         load.setCursor(Qt.CursorShape.PointingHandCursor)
         load.clicked.connect(self._load_preset)
-        head.addWidget(load)
         add = QPushButton("  + New rule")
         add.setProperty("class", "primary")
         add.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -540,7 +603,12 @@ class BlocksPage(QWidget):
         bar.addWidget(self.run_btn)
         root.addLayout(bar)
         self.status = make_label("Not running. Rules still fire from ▶ Try.", "faint")
-        root.addWidget(self.status)
+        srow = QHBoxLayout()
+        srow.addWidget(self.status, stretch=1)
+        srow.addWidget(make_label("Examples:", "dim"))
+        srow.addWidget(self.preset)
+        srow.addWidget(load)
+        root.addLayout(srow)
 
         # palette | canvas
         split = QHBoxLayout()
@@ -551,7 +619,7 @@ class BlocksPage(QWidget):
         pal = QWidget()
         pl = QVBoxLayout(pal)
         pl.setContentsMargins(0, 0, 8, 0)
-        pl.setSpacing(5)
+        pl.setSpacing(2)
         for cat, color, items in PALETTE:
             pl.addWidget(make_label(cat, None, 12, QFont.Weight.Bold, color))
             for key, text in items:
@@ -561,6 +629,7 @@ class BlocksPage(QWidget):
             pl.addSpacing(6)
         pl.addStretch()
         pal_scroll.setWidget(pal)
+        self.pal_scroll = pal_scroll
         split.addWidget(pal_scroll)
 
         canvas_scroll = QScrollArea()
@@ -760,6 +829,10 @@ class BlocksPage(QWidget):
             if msgs:
                 self.status.setText(f"message: {msgs[-1]}")
                 msgs.clear()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.pal_scroll.verticalScrollBar().setValue(0)
 
     def shutdown(self):
         if self.runtime:
