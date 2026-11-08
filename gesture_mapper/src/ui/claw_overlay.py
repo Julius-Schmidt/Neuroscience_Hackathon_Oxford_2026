@@ -54,6 +54,8 @@ class ClawState:
         # followed by a press again within this grace time is treated as one continuous hold
         self.grace_s = 0.3
         self.release_at = None
+        self.release_pos = None               # where the line was when you let go
+        self.v_now = 0.0
 
     # ── scanning ──
     def _speed(self):
@@ -61,10 +63,19 @@ class ClawState:
 
     def tick(self, now, dt):
         if self.release_at is not None and now >= self.release_at:
-            self.driving, self.release_at = None, None      # the let-go was real: stop
+            # the let-go was real: stop, and put the line back where it was when you let go
+            # (minus your reaction time), so the grace period never causes an overshoot
+            ax, pos, v = self.release_pos
+            back = (pos - v * self.lag_s) % 1.0
+            if ax == "x":
+                self.cx = back
+            else:
+                self.cy = back
+            self.driving, self.release_at, self.release_pos = None, None, None
         if self.stage == self.DRIVE and self.driving:
             held = now - self.held_since
             v = self.v0 + (self.vmax - self.v0) * min(1.0, max(0.0, held - 0.15) / self.ramp_s)
+            self.v_now = v
             ax = self.driving
             val = ((self.cx if ax == "x" else self.cy) + v * dt) % 1.0   # wrap back to the start
             if ax == "x":
@@ -130,7 +141,7 @@ class ClawState:
             self.cx, self.cy = 0.0, 0.0       # lines start at the left / top edge
         if down:
             if self.release_at is not None and self.driving == axis and now < self.release_at:
-                self.release_at = None               # just a flicker: keep gliding, keep the speed
+                self.release_at = self.release_pos = None   # just a flicker: keep gliding, keep the speed
                 return None
             self.driving, self.held_since, self.release_at = axis, now, None
             self._start = (self.cx, self.cy)
@@ -140,6 +151,7 @@ class ClawState:
         if now - self.held_since >= self.tap_s:      # end of a glide: stop after the grace time
             if self.release_at is None:
                 self.release_at = now + self.grace_s
+                self.release_pos = (axis, self.cx if axis == "x" else self.cy, self.v_now)
             return None
         self.driving = None
         if True:                                     # a tap, not a glide: undo the nudge, click

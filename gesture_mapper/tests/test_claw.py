@@ -118,6 +118,17 @@ check(s.driving == "x", "still gliding during the grace time")
 s.tick(2.4, 0.2)
 x2 = s.cx
 s.tick(2.6, 0.2)
-check(s.driving is None and s.cx == x2 and s.stage == "drive", "stops once the release lasts longer than the grace time")
+check(s.driving is None and s.stage == "drive", "stops once the release lasts longer than the grace time")
+# no overshoot: after the grace time the line goes back to where it was at the let-go (minus reaction time)
+s = ClawState(lag_s=0.08)
+s.drive("y", True, 0.0)
+for k in range(60):
+    s.tick(0.02 * (k + 1), 0.02)
+y_at_release, v = s.cy, s.v_now
+s.drive("y", False, 1.2)
+for k in range(30):
+    s.tick(1.2 + 0.02 * (k + 1), 0.02)
+check(abs(s.cy - (y_at_release - v * 0.08)) < 1e-9 and s.driving is None,
+      f"no overshoot from the grace time ({s.cy:.3f} vs release {y_at_release:.3f})")
 print("ALL PASS" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)
