@@ -101,5 +101,23 @@ eng = R.RuleEngine(ex, d)
 eng.handle(R.Event("myo", "right.fist", "press"))
 eng.handle(R.Event("myo", "right.double_tap", "press"))
 check(ex.got == ["claw_step", "claw_cancel"], f"claw actions go to the GUI hook ({ex.got})")
+# flicker: a short dropout mid-hold doesn't stop the glide; a real let-go does
+s = ClawState()
+s.drive("x", True, 0.0)
+for k in range(50):
+    s.tick(0.02 * (k + 1), 0.02)
+s.drive("x", False, 1.0)            # dropout...
+s.tick(1.1, 0.1)
+s.drive("x", True, 1.15)            # ...back within 0.3 s
+x1 = s.cx
+s.tick(1.3, 0.15)
+check(s.driving == "x" and s.cx > x1, "a 0.15 s dropout mid-hold keeps the glide going")
+s.drive("x", False, 2.0)
+s.tick(2.2, 0.2)
+check(s.driving == "x", "still gliding during the grace time")
+s.tick(2.4, 0.2)
+x2 = s.cx
+s.tick(2.6, 0.2)
+check(s.driving is None and s.cx == x2 and s.stage == "drive", "stops once the release lasts longer than the grace time")
 print("ALL PASS" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

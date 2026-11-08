@@ -50,12 +50,18 @@ class ClawState:
         self.drive_dir = {"x": 1, "y": 1}
         self.held_since = 0.0
         self.v0, self.vmax, self.ramp_s, self.tap_s = 0.04, 0.6, 1.6, 0.3
+        # a held fist's classifier output can drop out for a moment mid-hold: a release that is
+        # followed by a press again within this grace time is treated as one continuous hold
+        self.grace_s = 0.3
+        self.release_at = None
 
     # ── scanning ──
     def _speed(self):
         return (self.hi - self.lo) / self.sweep_s
 
     def tick(self, now, dt):
+        if self.release_at is not None and now >= self.release_at:
+            self.driving, self.release_at = None, None      # the let-go was real: stop
         if self.stage == self.DRIVE and self.driving:
             held = now - self.held_since
             v = self.v0 + (self.vmax - self.v0) * min(1.0, max(0.0, held - 0.15) / self.ramp_s)
@@ -123,13 +129,20 @@ class ClawState:
             self.stage = self.DRIVE
             self.cx, self.cy = 0.0, 0.0       # lines start at the left / top edge
         if down:
-            self.driving, self.held_since = axis, now
+            if self.release_at is not None and self.driving == axis and now < self.release_at:
+                self.release_at = None               # just a flicker: keep gliding, keep the speed
+                return None
+            self.driving, self.held_since, self.release_at = axis, now, None
             self._start = (self.cx, self.cy)
             return None
         if self.driving != axis:
             return None
+        if now - self.held_since >= self.tap_s:      # end of a glide: stop after the grace time
+            if self.release_at is None:
+                self.release_at = now + self.grace_s
+            return None
         self.driving = None
-        if now - self.held_since < self.tap_s:     # a tap, not a glide: undo the nudge, click
+        if True:                                     # a tap, not a glide: undo the nudge, click
             self.cx, self.cy = self._start
             self.stage = self.IDLE                  # done: the overlay fades out after the click
             return self.cx, self.cy
