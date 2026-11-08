@@ -15,6 +15,7 @@ from page_home import HomePage
 from page_gestures import GesturesPage
 from page_mappings import MappingsPage
 from page_settings import SettingsPage
+from page_blocks import BlocksPage
 from onboarding import OnboardingView
 
 
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
             ("Home",     "house.fill",              HomePage(self.engine)),
             ("Gestures", "hand.raised.fill",        GesturesPage(self.engine)),
             ("Mappings", "arrow.left.arrow.right",  MappingsPage(self.engine)),
+            ("Blocks",   "square.stack.3d.up.fill", BlocksPage(self.engine)),
             ("Settings", "gearshape.fill",          SettingsPage(self.engine)),
         ]):
             item = SidebarItem(f"  {title}", symbol)
@@ -129,5 +131,9 @@ class MainWindow(QMainWindow):
             theme.polish_macos_window(self)
 
     def closeEvent(self, e):
+        for i in range(self.pages.count()):
+            page = self.pages.widget(i)
+            if hasattr(page, "shutdown"):
+                page.shutdown()
         self.engine.shutdown()
         super().closeEvent(e)

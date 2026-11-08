@@ -1,0 +1,767 @@
+"""
+Blocks: a Scratch-style editor for the general rule engine (mapping-engine/rules.py).
+
+Any input -> any action. Each rule is a stack of blocks:
+
+    [when  Myo  right.fist  is pressed]      yellow "hat" - the event
+    [only if mode is  normal]                green - optional conditions
+    [hold mouse button  left]                blue / orange / purple - actions, top to bottom
+
+Drag blocks from the palette onto a rule, or CLICK a palette block to add it to the selected
+rule (no dragging needed - matters for the users this is for). "Try" fires the rule's event
+by hand; rules light up when they fire for real. Everything saves to data/rules.json as you
+edit, and the rules run live (Run rules) from the Myo bands, BCI/EEG markers (LSL) and the
+camera at the same time.
+"""
+
+import os
+import sys
+
+from PySide6.QtCore import QMimeData, QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QDrag, QFont, QPainter, QPixmap
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QHBoxLayout,
+                               QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+for sub in ("../sources", "../mapping-engine", "../os-integration"):
+    p = os.path.normpath(os.path.join(HERE, sub))
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+import theme  # noqa: E402
+import rules as R  # noqa: E402
+from widgets import make_label  # noqa: E402
+
+MIME = "application/x-neuratect-block"
+
+# Scratch's own category colours, so it reads as "blocks" at a glance
+C_EVENT, C_COND, C_INPUT, C_CONTROL, C_APP = "#ffbf00", "#59c059", "#4c97ff", "#ffab19", "#9966ff"
+
+SOURCE_LABELS = {"myo": "Myo band", "camera": "camera pose", "lsl": "BCI / EEG marker", "keyboard": "test key"}
+TRIGGER_SHORT = {"press": "starts", "release": "ends", "hold": "is held", "value": "moves"}
+
+PALETTE = [
+    ("Events", C_EVENT, [("hat:myo", "when Myo gesture"), ("hat:camera", "when camera pose"),
+                         ("hat:lsl", "when BCI / EEG marker"), ("hat:keyboard", "when test key")]),
+    ("Only if", C_COND, [("cond:mode", "only if mode is"), ("cond:not_mode", "only if mode is not"),
+                         ("cond:context", "only if app in front is")]),
+    ("Keys & mouse", C_INPUT, [("act:key_tap", "press key"), ("act:key_hold", "hold key"),
+                               ("act:shortcut", "press shortcut"), ("act:type_text", "type"),
+                               ("act:mouse_click", "click mouse"), ("act:mouse_hold", "hold mouse button"),
+                               ("act:mouse_move", "move mouse with value"), ("act:scroll", "scroll")]),
+    ("Control", C_CONTROL, [("act:set_mode", "set mode to"), ("act:toggle_mode", "toggle mode"),
+                            ("act:wait", "wait")]),
+    ("Apps & feedback", C_APP, [("act:open", "open app / website"), ("act:command", "built-in command"),
+                                ("act:sound", "play sound"), ("act:say", "show message")]),
+]
+ACTION_COLOR = {k.split(":")[1]: c for _cat, c, items in PALETTE for k, _ in items if k.startswith("act:")}
+
+KEY_NAMES = ["space", "enter", "esc", "tab", "backspace", "up", "down", "left", "right",
+             "w", "a", "s", "d", "e", "q", "shift", "ctrl", "alt"] + list("bcfghijklmnoprtuvxyz") + list("0123456789")
+
+
+def _darker(hex_color: str, f=130) -> str:
+    return QColor(hex_color).darker(f).name()
+
+
+def _block_qss(color: str) -> str:
+    return (f"QFrame#block {{ background: {color}; border: 1px solid {_darker(color)}; border-radius: 9px; }}"
+            f"QFrame#block QLabel {{ color: white; font-weight: 600; background: transparent; }}"
+            f"QFrame#block QComboBox, QFrame#block QLineEdit, QFrame#block QSpinBox, QFrame#block QDoubleSpinBox {{"
+            f" background: white; color: #222; border: none; border-radius: 9px; padding: 2px 8px; min-height: 20px; }}"
+            f"QFrame#block QComboBox QAbstractItemView {{ background: white; color: #222; selection-background-color: {color}; }}"
+            f"QFrame#block QPushButton {{ background: transparent; border: none; color: white; padding: 0 4px; font-weight: 700; }}"
+            f"QFrame#block QPushButton:hover {{ color: #222; }}")
+
+
+class _Bridge(QObject):
+    fired = Signal(str)
+    event = Signal(str)
+
+
+# ── one block ────────────────────────────────────────────────────────────────
+class BlockWidget(QFrame):
+    """A coloured block editing one dict in place (an action or a condition)."""
+    changed = Signal()
+    remove = Signal(object)
+    move = Signal(object, int)
+
+    def __init__(self, data: dict, kind: str, color: str, parent=None):
+        super().__init__(parent)
+        self.data, self.kind = data, kind
+        self.setObjectName("block")
+        self.setStyleSheet(_block_qss(color))
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 5, 4, 5)
+        lay.setSpacing(6)
+        self._build(lay)
+        lay.addStretch()
+        for txt, d in (("↑", -1), ("↓", 1)):
+            b = QPushButton(txt)
+            b.setToolTip("move up" if d < 0 else "move down")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, d=d: self.move.emit(self, d))
+            lay.addWidget(b)
+        rm = QPushButton("✕")
+        rm.setToolTip("remove block")
+        rm.setCursor(Qt.CursorShape.PointingHandCursor)
+        rm.clicked.connect(lambda: self.remove.emit(self))
+        lay.addWidget(rm)
+
+    def _lbl(self, lay, text):
+        lay.addWidget(QLabel(text))
+
+    def _combo(self, lay, field, options, editable=False, width=None):
+        cb = QComboBox()
+        cb.setEditable(editable)
+        cb.addItems([str(o) for o in options])
+        cur = str(self.data.get(field, options[0] if options else ""))
+        if cb.findText(cur) < 0:
+            cb.addItem(cur)
+        cb.setCurrentText(cur)
+        if width:
+            cb.setMinimumWidth(width)
+        cb.currentTextChanged.connect(lambda v: self._set(field, v))
+        lay.addWidget(cb)
+        return cb
+
+    def _line(self, lay, field, width=140):
+        le = QLineEdit(str(self.data.get(field, "")))
+        le.setMinimumWidth(width)
+        le.textChanged.connect(lambda v: self._set(field, v))
+        lay.addWidget(le)
+        return le
+
+    def _num(self, lay, field, lo, hi, step, decimals=1):
+        sb = QDoubleSpinBox() if decimals else QSpinBox()
+        if decimals:
+            sb.setDecimals(decimals)
+        sb.setRange(lo, hi)
+        sb.setSingleStep(step)
+        sb.setValue(float(self.data.get(field, 0)) if decimals else int(self.data.get(field, 0)))
+        sb.valueChanged.connect(lambda v: self._set(field, v))
+        lay.addWidget(sb)
+        return sb
+
+    def _set(self, field, value):
+        self.data[field] = value
+        self.changed.emit()
+
+    def _build(self, lay):
+        t = self.data.get("type")
+        if self.kind == "cond":
+            self._lbl(lay, R.CONDITIONS.get(t, {}).get("label", t) if t in R.CONDITIONS else t)
+            if t == "context":
+                self._combo(lay, "value", ["default", "minecraft", "spotlight"], editable=True, width=110)
+            else:
+                self._combo(lay, "value", ["normal", "paused", "typing", "game"], editable=True, width=100)
+            return
+        label = R.ACTIONS.get(t, {}).get("label", t)
+        if t in ("key_tap", "key_hold"):
+            self._lbl(lay, label)
+            self._combo(lay, "key", KEY_NAMES, editable=True, width=90)
+        elif t in ("mouse_click", "mouse_hold"):
+            self._lbl(lay, label)
+            self._combo(lay, "button", ["left", "right"])
+        elif t == "mouse_move":
+            self._lbl(lay, "move mouse with value  x")
+            self._num(lay, "gain", 0.1, 10.0, 0.1)
+        elif t == "scroll":
+            self._lbl(lay, "scroll")
+            self._num(lay, "amount", -20, 20, 1, decimals=0)
+            self._lbl(lay, "(+ up, − down)")
+        elif t == "type_text":
+            self._lbl(lay, "type")
+            self._line(lay, "text")
+        elif t == "shortcut":
+            self._lbl(lay, "press shortcut")
+            self._combo(lay, "keys", ["ctrl+c", "ctrl+v", "ctrl+z", "alt+tab", "ctrl+s", "cmd+space"],
+                        editable=True, width=110)
+        elif t == "command":
+            self._lbl(lay, "built-in command")
+            try:
+                import commands as C
+                names = sorted(C.ALL_COMMANDS)
+            except Exception:
+                names = ["OpenSpotlight"]
+            self._combo(lay, "name", names, width=130)
+        elif t == "open":
+            self._lbl(lay, "open")
+            self._line(lay, "target", 220)
+        elif t == "set_mode":
+            self._lbl(lay, "set mode to")
+            self._combo(lay, "value", ["normal", "paused", "typing", "game"], editable=True, width=100)
+        elif t == "toggle_mode":
+            self._lbl(lay, "toggle mode between")
+            self._combo(lay, "a", ["normal", "typing", "game"], editable=True, width=90)
+            self._lbl(lay, "and")
+            self._combo(lay, "b", ["paused", "typing", "game"], editable=True, width=90)
+        elif t == "wait":
+            self._lbl(lay, "wait")
+            self._num(lay, "seconds", 0.0, 5.0, 0.1)
+            self._lbl(lay, "seconds")
+        elif t == "sound":
+            self._lbl(lay, "play sound")
+            self._combo(lay, "name", ["pop", "mypop", "mypop_bass", "click", "ee"], editable=True, width=100)
+        elif t == "say":
+            self._lbl(lay, "show message")
+            self._line(lay, "text")
+        else:
+            self._lbl(lay, f"{t} (unknown block)")
+
+
+class HatBlock(QFrame):
+    changed = Signal()
+
+    def __init__(self, when: dict, parent=None):
+        super().__init__(parent)
+        self.when = when
+        self.setObjectName("block")
+        self.setStyleSheet(_block_qss(C_EVENT) + "QFrame#block QLabel { color: #3a2a00; }")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 8, 10, 8)
+        lay.setSpacing(6)
+        lay.addWidget(QLabel("when"))
+        self.src = QComboBox()
+        for k, v in SOURCE_LABELS.items():
+            self.src.addItem(v, k)
+        self.src.setCurrentIndex(max(0, list(SOURCE_LABELS).index(when.get("source", "myo"))
+                                     if when.get("source") in SOURCE_LABELS else 0))
+        lay.addWidget(self.src)
+        self.ev = QComboBox()
+        self.ev.setEditable(True)
+        self.ev.setMinimumWidth(150)
+        lay.addWidget(self.ev)
+        self.trig = QComboBox()
+        for k, v in TRIGGER_SHORT.items():
+            self.trig.addItem(v, k)
+        self.trig.setCurrentIndex(list(TRIGGER_SHORT).index(when.get("trigger", "press"))
+                                  if when.get("trigger") in TRIGGER_SHORT else 0)
+        lay.addWidget(self.trig)
+        lay.addStretch()
+        self._fill_events()
+        self.src.currentIndexChanged.connect(self._src_changed)
+        self.ev.currentTextChanged.connect(self._ev_changed)
+        self.trig.currentIndexChanged.connect(lambda _: self._set("trigger", self.trig.currentData()))
+
+    def _fill_events(self):
+        cur = self.when.get("name", "")
+        self.ev.blockSignals(True)
+        self.ev.clear()
+        self.ev.addItems(R.SOURCE_EVENTS.get(self.src.currentData(), []))
+        if cur and self.ev.findText(cur) < 0:
+            self.ev.addItem(cur)
+        self.ev.setCurrentText(cur or self.ev.itemText(0))
+        self.ev.blockSignals(False)
+        if not cur:
+            self.when["name"] = self.ev.currentText()
+
+    def _src_changed(self, _):
+        self.when["source"] = self.src.currentData()
+        self.when["name"] = ""
+        self._fill_events()
+        if self.when["name"].endswith(".pointer") and self.when.get("trigger") != "value":
+            self.trig.setCurrentIndex(list(TRIGGER_SHORT).index("value"))
+        self.changed.emit()
+
+    def _ev_changed(self, v):
+        self.when["name"] = v
+        if v.endswith(".pointer") and self.when.get("trigger") != "value":
+            self.trig.setCurrentIndex(list(TRIGGER_SHORT).index("value"))
+        self.changed.emit()
+
+    def _set(self, k, v):
+        self.when[k] = v
+        self.changed.emit()
+
+
+# ── one rule ─────────────────────────────────────────────────────────────────
+class RuleCard(QFrame):
+    changed = Signal()
+    selected = Signal(object)
+    delete = Signal(object)
+    try_it = Signal(object)
+
+    def __init__(self, rule: dict, parent=None):
+        super().__init__(parent)
+        self.rule = rule
+        self.setAcceptDrops(True)
+        self._is_selected = False
+        self._flash = 0
+        self.setObjectName("rulecard")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setSpacing(5)
+
+        head = QHBoxLayout()
+        self.enabled = QCheckBox()
+        self.enabled.setChecked(rule.get("enabled", True))
+        self.enabled.setToolTip("rule on / off")
+        self.enabled.toggled.connect(self._toggle)
+        head.addWidget(self.enabled)
+        self.title = QLineEdit(rule.get("title", ""))
+        self.title.setPlaceholderText("name this rule (optional)")
+        self.title.textChanged.connect(lambda v: (self.rule.__setitem__("title", v), self.changed.emit()))
+        head.addWidget(self.title, stretch=1)
+        tr = QPushButton("▶ Try")
+        tr.setToolTip("fire this rule's event now, as if the gesture happened")
+        tr.setCursor(Qt.CursorShape.PointingHandCursor)
+        tr.clicked.connect(lambda: self.try_it.emit(self))
+        head.addWidget(tr)
+        rm = QPushButton("Delete")
+        rm.setProperty("class", "danger")
+        rm.setCursor(Qt.CursorShape.PointingHandCursor)
+        rm.clicked.connect(lambda: self.delete.emit(self))
+        head.addWidget(rm)
+        lay.addLayout(head)
+
+        self.hat = HatBlock(rule.setdefault("when", {"source": "myo", "name": "right.fist", "trigger": "press"}))
+        self.hat.changed.connect(self.changed)
+        lay.addWidget(self.hat)
+        self.body = QVBoxLayout()
+        self.body.setContentsMargins(18, 0, 0, 0)    # blocks sit inside the hat, Scratch-style
+        self.body.setSpacing(4)
+        lay.addLayout(self.body)
+        self.hint = make_label("drop or click blocks to add them here", "faint")
+        self.hint.setContentsMargins(20, 2, 0, 0)
+        lay.addWidget(self.hint)
+        self._rebuild()
+        self._style()
+
+    def _toggle(self, on):
+        self.rule["enabled"] = on
+        self._style()
+        self.changed.emit()
+
+    def _rebuild(self):
+        while self.body.count():
+            w = self.body.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        for c in self.rule.setdefault("conditions", []):
+            self._add_widget(BlockWidget(c, "cond", C_COND))
+        for a in self.rule.setdefault("actions", []):
+            self._add_widget(BlockWidget(a, "act", ACTION_COLOR.get(a.get("type"), C_INPUT)))
+        self.hint.setVisible(not self.rule["conditions"] and not self.rule["actions"])
+
+    def _add_widget(self, w):
+        w.changed.connect(self.changed)
+        w.remove.connect(self._remove_block)
+        w.move.connect(self._move_block)
+        self.body.addWidget(w)
+
+    def _list_for(self, w):
+        return self.rule["conditions"] if w.kind == "cond" else self.rule["actions"]
+
+    def _remove_block(self, w):
+        lst = self._list_for(w)
+        if w.data in lst:
+            lst.remove(w.data)
+        self._rebuild()
+        self.changed.emit()
+
+    def _move_block(self, w, d):
+        lst = self._list_for(w)
+        i = next((k for k, x in enumerate(lst) if x is w.data), None)
+        if i is None or not 0 <= i + d < len(lst):
+            return
+        lst[i], lst[i + d] = lst[i + d], lst[i]
+        self._rebuild()
+        self.changed.emit()
+
+    def add_block(self, key: str) -> bool:
+        cat, kind = key.split(":", 1)
+        if cat == "cond":
+            self.rule["conditions"].append(R.new_condition(kind))
+        elif cat == "act":
+            self.rule["actions"].append(R.new_action(kind))
+        else:
+            return False
+        self._rebuild()
+        self.changed.emit()
+        return True
+
+    # selection + live feedback
+    def set_selected(self, on):
+        self._is_selected = on
+        self._style()
+
+    def flash(self):
+        self._flash = 6
+        self._style()
+
+    def tick(self):
+        if self._flash:
+            self._flash -= 1
+            if not self._flash:
+                self._style()
+
+    def _style(self):
+        border = theme.GREEN if self._flash else (theme.ACCENT if self._is_selected else theme.CARD_BORDER)
+        width = 2 if (self._flash or self._is_selected) else 1
+        bg = theme.CARD if self.rule.get("enabled", True) else theme.FIELD
+        self.setStyleSheet(f"QFrame#rulecard {{ background: {bg}; border: {width}px solid {border}; border-radius: 12px; }}")
+
+    def mousePressEvent(self, e):
+        self.selected.emit(self)
+        super().mousePressEvent(e)
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasFormat(MIME):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        key = bytes(e.mimeData().data(MIME)).decode()
+        self.selected.emit(self)
+        if not self.add_block(key):     # a hat dropped on a rule: start a new rule instead
+            self.parent_page.new_rule_from(key)
+        e.acceptProposedAction()
+
+
+# ── palette ──────────────────────────────────────────────────────────────────
+class PaletteBlock(QLabel):
+    clicked = Signal(str)
+
+    def __init__(self, key, text, color):
+        super().__init__(text)
+        self.key = key
+        hat = key.startswith("hat:")
+        fg = "#3a2a00" if color == C_EVENT else "white"
+        radius = "14px 14px 9px 9px" if hat else "9px"
+        self.setStyleSheet(f"background: {color}; color: {fg}; font-weight: 600; padding: 6px 10px;"
+                           f"border: 1px solid {_darker(color)}; border-radius: {radius.split()[0]};")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("click to add to the selected rule, or drag onto a rule")
+        self._press = None
+
+    def mousePressEvent(self, e):
+        self._press = e.position().toPoint()
+
+    def mouseMoveEvent(self, e):
+        if self._press is None or (e.position().toPoint() - self._press).manhattanLength() < 8:
+            return
+        self._press = None
+        drag = QDrag(self)
+        md = QMimeData()
+        md.setData(MIME, self.key.encode())
+        drag.setMimeData(md)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(QPoint(10, 10))
+        drag.exec(Qt.DropAction.CopyAction)
+
+    def mouseReleaseEvent(self, e):
+        if self._press is not None:
+            self.clicked.emit(self.key)
+        self._press = None
+
+
+# ── the page ─────────────────────────────────────────────────────────────────
+class BlocksPage(QWidget):
+    def __init__(self, engine=None, parent=None, rules_path=None, executor=None):
+        super().__init__(parent)
+        self.engine = engine
+        self.setObjectName("page")
+        self.rules_path = rules_path or R.RULES_PATH
+        self.data = R.load(self.rules_path)
+        self._executor = executor
+        self.runtime = None
+        self.cards: list[RuleCard] = []
+        self.sel: RuleCard | None = None
+        self.bridge = _Bridge()
+        self.bridge.fired.connect(self._on_fired)
+        self.bridge.event.connect(self._on_event)
+        self._events = []
+
+        # dark fields for the page's own dropdowns (the blocks style theirs themselves)
+        self._bar_qss = (f"QComboBox {{ background: {theme.FIELD}; color: {theme.TEXT}; border: 1px solid "
+                         f"{theme.CARD_BORDER}; border-radius: 8px; padding: 5px 10px; }}"
+                         f"QComboBox QAbstractItemView {{ background: {theme.CARD}; color: {theme.TEXT}; "
+                         f"selection-background-color: {theme.ACCENT}; }}")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 20, 28, 20)
+        root.setSpacing(10)
+
+        head = QHBoxLayout()
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        col.addWidget(make_label("Blocks", "h1"))
+        sub = make_label("Any input → any action. Click or drag blocks into a rule; "
+                         "changes save and apply instantly.", "dim")
+        sub.setWordWrap(True)
+        col.addWidget(sub)
+        head.addLayout(col)
+        head.addStretch()
+        import presets
+        self._presets = presets
+        self.preset = QComboBox()
+        for k, v in presets.TITLES.items():
+            self.preset.addItem(v, k)
+        self.preset.setStyleSheet(self._bar_qss)
+        head.addWidget(self.preset)
+        load = QPushButton("Load example")
+        load.setProperty("class", "ghost")
+        load.setCursor(Qt.CursorShape.PointingHandCursor)
+        load.clicked.connect(self._load_preset)
+        head.addWidget(load)
+        add = QPushButton("  + New rule")
+        add.setProperty("class", "primary")
+        add.setCursor(Qt.CursorShape.PointingHandCursor)
+        add.clicked.connect(lambda: self.new_rule_from("hat:myo"))
+        head.addWidget(add)
+        root.addLayout(head)
+
+        # sources + run bar
+        bar = QHBoxLayout()
+        bar.setSpacing(10)
+        bar.addWidget(make_label("Inputs:", "dim"))
+        self.myo_mode = QComboBox()
+        self.myo_mode.addItem("Myo off", "off")
+        self.myo_mode.addItem("Myo: built-in poses (no training)", "builtin")
+        self.myo_mode.addItem("Myo: trained click", "trained")
+        self.myo_mode.setStyleSheet(self._bar_qss)
+        bar.addWidget(self.myo_mode)
+        self.user = QLineEdit()
+        self.user.setPlaceholderText("user (trained)")
+        self.user.setMaximumWidth(120)
+        bar.addWidget(self.user)
+        self.use_lsl = QCheckBox("BCI / EEG (LSL)")
+        bar.addWidget(self.use_lsl)
+        self.use_cam = QCheckBox("Camera poses")
+        bar.addWidget(self.use_cam)
+        bar.addStretch()
+        self.mode_lbl = make_label("mode: normal", None, 12, QFont.Weight.DemiBold, C_CONTROL)
+        bar.addWidget(self.mode_lbl)
+        self.run_btn = QPushButton("▶  Run rules")
+        self.run_btn.setProperty("class", "primary")
+        self.run_btn.setCheckable(True)
+        self.run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.run_btn.toggled.connect(self._run_toggled)
+        bar.addWidget(self.run_btn)
+        root.addLayout(bar)
+        self.status = make_label("Not running. Rules still fire from ▶ Try.", "faint")
+        root.addWidget(self.status)
+
+        # palette | canvas
+        split = QHBoxLayout()
+        split.setSpacing(16)
+        pal_scroll = QScrollArea()
+        pal_scroll.setWidgetResizable(True)
+        pal_scroll.setFixedWidth(250)
+        pal = QWidget()
+        pl = QVBoxLayout(pal)
+        pl.setContentsMargins(0, 0, 8, 0)
+        pl.setSpacing(5)
+        for cat, color, items in PALETTE:
+            pl.addWidget(make_label(cat, None, 12, QFont.Weight.Bold, color))
+            for key, text in items:
+                pb = PaletteBlock(key, text, color)
+                pb.clicked.connect(self._palette_click)
+                pl.addWidget(pb)
+            pl.addSpacing(6)
+        pl.addStretch()
+        pal_scroll.setWidget(pal)
+        split.addWidget(pal_scroll)
+
+        canvas_scroll = QScrollArea()
+        canvas_scroll.setWidgetResizable(True)
+        self.canvas = QWidget()
+        self.canvas.setAcceptDrops(True)
+        self.canvas.dragEnterEvent = self._canvas_drag_enter
+        self.canvas.dropEvent = self._canvas_drop
+        self.cl = QVBoxLayout(self.canvas)
+        self.cl.setContentsMargins(0, 0, 8, 0)
+        self.cl.setSpacing(12)
+        self.empty = make_label("No rules yet. Click a yellow  when …  block to start one, "
+                                "or pick an example at the top and press Load example.", "dim")
+        self.empty.setWordWrap(True)
+        self.empty.setContentsMargins(6, 20, 6, 0)
+        self.cl.addWidget(self.empty)
+        self.cl.addStretch()
+        canvas_scroll.setWidget(self.canvas)
+        split.addWidget(canvas_scroll, stretch=1)
+        root.addLayout(split, stretch=1)
+
+        self.ticker = make_label("events: —", "faint")
+        root.addWidget(self.ticker)
+
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(300)
+        self._save_timer.timeout.connect(self.save)
+        self._tick = QTimer(self)
+        self._tick.setInterval(100)
+        self._tick.timeout.connect(self._on_tick)
+        self._tick.start()
+        self._ensure_runtime()
+        self._rebuild()
+
+    # ── model ──
+    def _ensure_runtime(self):
+        if self.runtime is None:
+            from runtime import Runtime
+            try:
+                from context import get_active_context
+            except Exception:
+                get_active_context = None
+            self.runtime = Runtime(self._executor, self.data, get_active_context)
+            self.runtime.engine.listeners.append(lambda rid, ev: self.bridge.fired.emit(rid))
+            self.runtime.event_listeners.append(
+                lambda ev: self.bridge.event.emit(f"{ev.source}:{ev.name} {ev.kind}") if ev.kind != "value" else None)
+            self.runtime.start()
+
+    def _rebuild(self):
+        for c in self.cards:
+            c.setParent(None)
+            c.deleteLater()
+        self.cards = []
+        self.empty.setVisible(not self.data["rules"])
+        for r in self.data["rules"]:
+            self._add_card(r)
+        if self.cards and self.sel not in self.cards:
+            self._select(self.cards[-1])
+
+    def _add_card(self, rule):
+        c = RuleCard(rule)
+        c.parent_page = self
+        c.changed.connect(self._changed)
+        c.selected.connect(self._select)
+        c.delete.connect(self._delete)
+        c.try_it.connect(self._try)
+        self.cl.insertWidget(self.cl.count() - 1, c)
+        self.cards.append(c)
+        self.empty.setVisible(False)
+        return c
+
+    def _select(self, card):
+        self.sel = card
+        for c in self.cards:
+            c.set_selected(c is card)
+
+    def _changed(self):
+        self._save_timer.start()
+
+    def save(self):
+        self.data["mode"] = self.runtime.engine.mode if self.runtime else self.data.get("mode", "normal")
+        R.save(self.data, self.rules_path)
+
+    def new_rule_from(self, key: str):
+        src = key.split(":", 1)[1] if key.startswith("hat:") else "myo"
+        name = R.SOURCE_EVENTS.get(src, [""])[0]
+        rule = R.new_rule(src, name, "press")
+        self.data["rules"].append(rule)
+        card = self._add_card(rule)
+        self._select(card)
+        self._changed()
+        return card
+
+    def _palette_click(self, key):
+        if key.startswith("hat:") or self.sel is None:
+            card = self.new_rule_from(key if key.startswith("hat:") else "hat:myo")
+            if not key.startswith("hat:"):
+                card.add_block(key)
+        else:
+            self.sel.add_block(key)
+
+    def _delete(self, card):
+        if card.rule in self.data["rules"]:
+            self.data["rules"].remove(card.rule)
+        self.cards.remove(card)
+        card.setParent(None)
+        card.deleteLater()
+        if self.sel is card:
+            self.sel = None
+            if self.cards:
+                self._select(self.cards[-1])
+        self.empty.setVisible(not self.cards)
+        self._changed()
+
+    def _load_preset(self):
+        key = self.preset.currentData()
+        if self.data["rules"] and QMessageBox.question(
+                self, "Load example", "Replace your current rules with this example?") != QMessageBox.StandardButton.Yes:
+            return
+        self.load_preset(key)
+
+    def load_preset(self, key):
+        self.data.clear()
+        self.data.update(self._presets.PRESETS[key]())
+        self.runtime.engine.set_rules(self.data)
+        self.sel = None
+        self._rebuild()
+        self.save()
+
+    def _try(self, card):
+        w = card.rule.get("when", {})
+        if w.get("trigger") == "value":
+            ev = R.Event(w.get("source", "myo"), w.get("name", ""), "value", (40, 0))
+            self.runtime.emit(ev)
+            return
+        self.runtime.emit(R.Event(w.get("source", "myo"), w.get("name", ""), "press"))
+        QTimer.singleShot(400, lambda: self.runtime.emit(R.Event(w.get("source", "myo"), w.get("name", ""), "release")))
+
+    # ── canvas drops: a hat on empty canvas = new rule ──
+    def _canvas_drag_enter(self, e):
+        if e.mimeData().hasFormat(MIME):
+            e.acceptProposedAction()
+
+    def _canvas_drop(self, e):
+        key = bytes(e.mimeData().data(MIME)).decode()
+        self._palette_click(key)
+        e.acceptProposedAction()
+
+    # ── running ──
+    def _run_toggled(self, on):
+        self.run_btn.setText("■  Stop rules" if on else "▶  Run rules")
+        if on:
+            mode = self.myo_mode.currentData()
+            if mode != "off":
+                from myo_source import MyoSource
+                user = self.user.text().strip() or None
+                if mode == "trained" and not user:
+                    self.status.setText("Trained mode needs your user name (the one you trained with).")
+                    self.run_btn.setChecked(False)
+                    return
+                self.runtime.add_source(MyoSource(mode, user))
+            if self.use_lsl.isChecked():
+                from lsl_source import LslSource
+                self.runtime.add_source(LslSource())
+            if self.use_cam.isChecked():
+                from camera_source import CameraSource
+                det = getattr(self.engine, "detector", None)
+                self.runtime.add_source(CameraSource(det, own_pump=det is None))
+            if not self.runtime.sources:
+                self.status.setText("No inputs chosen: pick Myo, BCI/EEG or camera first.")
+                self.run_btn.setChecked(False)
+        else:
+            for n in list(self.runtime.sources):
+                self.runtime.remove_source(n)
+            self.runtime.engine.release_all()
+            self.status.setText("Stopped. Rules still fire from ▶ Try.")
+
+    def _on_fired(self, rid):
+        for c in self.cards:
+            if c.rule.get("id") == rid:
+                c.flash()
+
+    def _on_event(self, text):
+        self._events = (self._events + [text])[-6:]
+        self.ticker.setText("events:  " + "   ·   ".join(self._events))
+
+    def _on_tick(self):
+        for c in self.cards:
+            c.tick()
+        if self.runtime:
+            self.mode_lbl.setText(f"mode: {self.runtime.engine.mode}")
+            if self.runtime.sources:
+                self.status.setText("   ".join(f"{n}: {s.status}" for n, s in self.runtime.sources.items()))
+            ex = self.runtime.engine.executor
+            msgs = getattr(ex, "messages", None)
+            if msgs:
+                self.status.setText(f"message: {msgs[-1]}")
+                msgs.clear()
+
+    def shutdown(self):
+        if self.runtime:
+            self.runtime.stop()
+        self.save()
