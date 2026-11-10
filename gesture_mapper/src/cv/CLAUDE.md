@@ -5,7 +5,7 @@
 - Camera selection is name-based (cv2-enumerate-cameras). Never hardcode an index —
   AVFoundation and OpenCV sort by uniqueID, so index 0 moves when Continuity Camera appears.
 - MediaPipe 1.0.0 dropped `mp.solutions.*`; use `tasks.python.vision.HandLandmarker` with
-  `hand_landmarker.task` (in src/cv/). Downgrading to 0.10.x doesn't help on arm64.
+  `hand_landmarker.task` (in the repo-root assets/). Downgrading to 0.10.x doesn't help on arm64.
 - cv2.imshow works here, but **main thread only** (macOS forbids otherwise — that's what the
   old "doesn't work" note actually was). A camera preview for the UI module is viable;
   run.py's cbreak KeyListener predates this and isn't evidence against it.

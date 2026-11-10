@@ -11,7 +11,7 @@ from mediapipe.tasks.python.components.containers import NormalizedLandmark
 
 from detector import _is_fist
 
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "assets", "hand_landmarker.task")
 
 # Landmark connections for drawing (index pairs)
 _CONNECTIONS = mp_vision.HandLandmarksConnections.HAND_CONNECTIONS

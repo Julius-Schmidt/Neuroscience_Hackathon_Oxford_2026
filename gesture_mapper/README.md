@@ -4,19 +4,22 @@ Gesture-controlled command mapper for macOS and Windows. A webcam watches your h
 finger pinches become real keyboard and mouse input. Camera in, OS actions out - and, through the
 **Blocks** page, any other input too (Myo armbands, EEG/BCI markers).
 
-Status: working MVP. Built and tuned on macOS; Windows support added Sun 8 Nov (see below). Two contexts are built out — the desktop (the hand *is* the
+Part of [Neuroscience Hackathon Oxford 2026](../README.md).
+
+Status: working MVP. Built and tuned on macOS; Windows support is newer and less tested (see below). Two contexts are built out — the desktop (the hand *is* the
 mouse) and Minecraft (movement, camera, clicks, hotbar, inventory).
 
 ## Requirements
 
-macOS, a webcam, and Python 3.10+ (developed on 3.13).
+macOS or Windows, a webcam, and Python 3.10+ (developed on 3.13).
 
 ```
 pip install -r requirements.txt
 ```
 
 Versions there are pinned to what this actually runs on, so a second machine behaves the
-same. The MediaPipe model file `src/cv/hand_landmarker.task` is in the repo — no download
+same. The MediaPipe model file ([`../assets/hand_landmarker.task`](../assets/hand_landmarker.task), shared with
+myomouse) is in the repo — no download
 step.
 
 ## Windows
@@ -114,7 +117,8 @@ release must be above engage). Set thresholds from measured ratios, not guesses.
 ## Tests
 
 ```
-python3 tests/test_click_routing.py    # …or any of the five suites
+pytest -q                              # all suites
+python3 tests/test_click_routing.py    # …or any one suite on its own
 ```
 
 No camera and no Minecraft needed; each prints PASS/FAIL per check and exits non-zero on
@@ -141,8 +145,11 @@ which is the only coverage of the wiring.
 ## Layout
 
 `src/cv/` camera and classification · `src/mapping-engine/` (gesture, context) → command ·
-`src/os-integration/` all macOS API calls · `notes/` state, decisions, deferred ·
-`build-plan.md` how the next phase is meant to go.
+`src/os-integration/` all macOS API calls · `src/sources/` Myo / LSL / camera inputs for Blocks ·
+`src/ui/` the GUI · `notes/` development notes: state, decisions, deferred, and
+`build-plan.md` (how the next phase is meant to go).
 
 Each module folder has a `CLAUDE.md` with its non-obvious constraints — read that before
-changing the module.
+changing the module (they double as context for AI coding assistants).
+
+Hand tracking: MediaPipe Hands ([references](../docs/REFERENCES.md) [15], [16]).

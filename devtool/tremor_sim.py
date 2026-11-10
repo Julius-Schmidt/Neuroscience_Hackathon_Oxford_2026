@@ -2,7 +2,7 @@
 
     python -m devtool.tremor_sim data/devtool/sessions/<id>_fatigue_raw.npz --models models/dylan
 
-MS tremor is mostly postural / intention tremor at 2.5-7 Hz: the muscles switch on and off a
+MS tremor is mostly postural / intention tremor at 2.5-7 Hz (docs/REFERENCES.md [14]): the muscles switch on and off a
 few times a second. A deliberate fist is one sustained contraction. This script adds simulated
 tremor to a real dev tool mode 4 recording and replays the LDA click with different hold rules:
 

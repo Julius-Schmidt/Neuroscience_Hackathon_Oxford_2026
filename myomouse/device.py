@@ -20,6 +20,7 @@ from . import config as C
 
 
 def _uuid(short: int) -> str:
+    # Myo BLE protocol (Thalmic Labs myohw.h, docs/REFERENCES.md [9])
     return f"d506{short:04x}-a904-deb9-4748-2c7f4a124842"
 
 

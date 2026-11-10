@@ -1,11 +1,18 @@
-bleak
-numpy
-scikit-learn
-joblib
-pynput
-pygame-ce
-pytest
+# myomouse + devtool. Versions this project is known to run on (macOS, Python 3.14).
+# Neuratect (gesture_mapper/) has its own requirements.txt.
+bleak==3.0.2
+numpy==2.5.4
+scikit-learn==1.9.1
+joblib==1.6.0
+pynput==1.8.2
+pygame-ce==2.5.8
+matplotlib==3.11.2        # devtool charts (replay_fatigue, fatigue_features, slide_charts)
+pytest==9.2.0
+
 # camera labels while recording (not needed for the live demo)
-mediapipe
-opencv-python
-cv2-enumerate-cameras
+mediapipe==1.2.2
+opencv-python==5.0.0.93
+cv2-enumerate-cameras==1.4.0
+
+# optional: record your own switch sound (myomouse.sound_switch --record)
+# sounddevice==0.5.6

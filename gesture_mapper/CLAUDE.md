@@ -24,8 +24,8 @@ Invoke the `session-end` skill — it owns the notes protocol.
 - Verify by running, not by reading code back. Grep before Read; read line ranges, not
   files. Dispatch read-heavy "where does X happen" to a subagent.
 - Narrowest vertical slice first. End sessions at a green test suite.
-  `python3 tests/*.py` — no camera, no Minecraft, every suite prints PASS/FAIL.
-- Slice order and its rationale: `build-plan.md`. Read once at project start, not per
+  `pytest -q` (or `python3 tests/<name>.py`) — no camera, no Minecraft, every suite prints PASS/FAIL.
+- Slice order and its rationale: `notes/build-plan.md`. Read once at project start, not per
   session.
 
 ## Non-obvious constraints

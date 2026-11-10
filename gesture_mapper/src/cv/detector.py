@@ -23,7 +23,7 @@ except ImportError:
     from recognizer import recognize
     from camera import index_for_name
 
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "assets", "hand_landmarker.task")
 
 
 class GestureDetector:

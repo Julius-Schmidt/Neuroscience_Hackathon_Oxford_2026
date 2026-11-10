@@ -103,8 +103,8 @@ check(R.load(p + ".missing")["rules"] == [], "missing file -> empty rule set")
 
 # 8. value events drive mouse movement through the real executor (stub OS)
 import actions
-from quartz_compat import Quartz as Q
-if hasattr(Q, "posted"):
+Q = actions.Quartz
+if hasattr(Q, "posted"):    # only with the recording stub (Windows / Linux); on macOS it's the real Quartz
     Q.posted.clear()
     ex = actions.OSExecutor()
     eng = R.RuleEngine(ex, {"rules": [rule("myo", "right.pointer", "value", [("mouse_move", {"gain": 2.0})]),

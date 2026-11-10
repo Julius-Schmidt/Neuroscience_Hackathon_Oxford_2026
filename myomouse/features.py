@@ -1,4 +1,4 @@
-"""Classic time-domain EMG features (Hudgins set). Fast enough to run every 10 ms."""
+"""Classic time-domain EMG features (Hudgins set; docs/REFERENCES.md [1], [2]). Fast enough to run every 10 ms."""
 
 import numpy as np
 

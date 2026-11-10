@@ -40,7 +40,7 @@ from keypress import KeyListener
 # a file+console handler; standalone here we just need console.
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "assets", "hand_landmarker.task")
 
 PORT = 5555
 

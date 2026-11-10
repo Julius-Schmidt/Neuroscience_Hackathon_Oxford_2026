@@ -3,7 +3,7 @@
     python -m myomouse.identify
 
 Wear both bands. Each band vibrates in turn and you type which arm felt it.
-Make sure no other program (Myo Connect, myo_controller.py) is connected to the bands.
+Make sure no other program (Myo Connect, another script) is connected to the bands.
 """
 
 import asyncio

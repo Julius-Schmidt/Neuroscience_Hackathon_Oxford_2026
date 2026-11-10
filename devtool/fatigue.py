@@ -2,7 +2,7 @@
 
 As someone tires (or as MS fatigue sets in) their squeezes get weaker, so a fixed click
 threshold starts missing clicks. FatigueTracker follows the user's current typical squeeze
-strength with a 1-D Kalman filter and turns it into two things:
+strength with a 1-D Kalman filter [13] and turns it into two things:
 
     threshold(base)  the click threshold, scaled with current strength   (threshold detector)
     gain()           a factor to multiply raw EMG by before features      (LDA: tired squeezes
@@ -15,7 +15,7 @@ would only ever see squeezes strong enough to click, and would never notice fati
 
 Safety: the threshold never drops below `floor` (rest noise + margin), the gain is capped,
 and the first `warmup` bursts only set the starting strength (threshold stays fixed meanwhile).
-Real fatigue can make EMG *rise* before it falls (Leeb et al. 2011), so the random walk lets
+Real fatigue can make EMG *rise* before it falls (Leeb et al. 2011 [12]; [n] = docs/REFERENCES.md), so the random walk lets
 strength move both ways; the threshold is capped at `max_up` x base on the way up.
 """
 

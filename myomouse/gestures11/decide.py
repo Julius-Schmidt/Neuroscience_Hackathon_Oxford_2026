@@ -6,7 +6,7 @@ control literature:
 1. amplitude gate:  EMG about as quiet as your recorded rest -> neutral, whatever the classifier
                     says (onset detection: rest level + GATE_K x its spread)
 2. rejection:       the classifier's best guess is below REJECT probability -> neutral
-                    (confidence-based rejection, Scheme / Englehart / Hudgins)
+                    (confidence-based rejection; docs/REFERENCES.md [4], [5])
 3. switching:       a gesture must win N_ON decisions in a row to be shown; N_OFF neutral
                     decisions in a row are enough to drop back (asymmetric, like the click debouncer)
 

@@ -8,9 +8,9 @@ peak, within 1.5 s of the cue) and computes, on the most active channels:
     rms, mav      amplitude. Fatigue at a FIXED effort -> up; but people also squeeze softer
                   when tired, so amplitude mixes fatigue with effort.
     mnf, mdf      mean / median frequency. Fatigue -> down (spectrum shifts to low frequencies).
-    dimitrov      FInsm5 = sum(P/f) / sum(P f^5). Fatigue -> up; reported as the most sensitive.
+    dimitrov      FInsm5 = sum(P/f) / sum(P f^5). Fatigue -> up; reported as the most sensitive [10].
     low_frac      share of power in 15-45 Hz (tracks the median-frequency shift; Allison &
-                  Fujiwara 2002) - fully inside the Myo's 0-100 Hz band. Fatigue -> up.
+                  Fujiwara 2002 [11]) - fully inside the Myo's 0-100 Hz band. Fatigue -> up.
     zc            zero crossings per second, a time-domain frequency proxy. Fatigue -> down.
 
 The Myo samples at 200 Hz, so everything above 100 Hz is invisible (and partly aliased):
@@ -21,6 +21,7 @@ effect size between the first and last fifth of the fatigue phase (Cohen's d, si
 so "moves the way fatigue should" is positive), plus whether it moves back during recovery.
 
 Outputs <id>_features.csv (one row per squeeze) and <id>_features.png.
+[n] = docs/REFERENCES.md.
 """
 
 import argparse

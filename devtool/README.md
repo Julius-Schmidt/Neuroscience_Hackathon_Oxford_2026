@@ -49,7 +49,7 @@ It saves `<id>_fatigue_replay.csv` and a chart `<id>_fatigue_replay.png`.
 
 **How the adaptive threshold works (`devtool/fatigue.py`):** every squeeze burst (a click, or a weaker
 near-miss that rose clearly above rest) is one measurement of the user's current squeeze strength.
-A 1-D Kalman filter tracks that strength; the threshold scales with it (after 5 warm-up squeezes).
+A 1-D Kalman filter ([13]) tracks that strength; the threshold scales with it (after 5 warm-up squeezes).
 It never drops below 1.5 x the calibrated rest noise, and never rises above 1.5 x the base threshold.
 `FatigueTracker.gain()` gives the same information as a factor to rescale raw EMG before LDA features.
 
@@ -117,3 +117,8 @@ The numbers tell you how a threshold click behaves and give you labelled EMG win
 don't measure the trained model.
 
 Tests: `pytest -q tests/test_devtool.py` (no hardware).
+
+## Results and references
+
+What the fatigue, weakness and tremor tools found: [docs/ms_stress_test.md](../docs/ms_stress_test.md).
+[n] = [docs/REFERENCES.md](../docs/REFERENCES.md) (feature definitions, fatigue indices, MS tremor).

@@ -69,7 +69,7 @@ CAM_STRAY_FRAC = 0.6   # in neutral phases, a pose change above this fraction of
 WINDOW = 40        # samples per window (200 ms)
 STEP = 5           # a new decision every 5 samples (25 ms)
 # Live decisions (gestures11/decide.py); everything below falls back to "neutral" = no gesture
-REJECT = 0.6       # the classifier must be at least this sure, else neutral (literature: 0.6-0.75 works best)
+REJECT = 0.6       # the classifier must be at least this sure, else neutral (0.6-0.75 works best: docs/REFERENCES.md [5])
 REST_GATE = False  # off: with these 5 gestures it hid power grip (a quiet gesture) and REJECT + N_ON already
                    # keep false gestures at ~1-2%. train --rest-gate turns it on.
 GATE_K = 3.0       # rest gate: EMG quieter than rest median + GATE_K * spread of rest -> neutral

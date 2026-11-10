@@ -22,7 +22,7 @@ from recognizer import RECOGNITION_THRESHOLD
 from camera import index_for_name, list_cameras
 from keypress import KeyListener
 
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "assets", "hand_landmarker.task")
 _SAMPLES_REQUIRED = 5
 
 

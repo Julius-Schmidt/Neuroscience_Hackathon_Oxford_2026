@@ -10,7 +10,7 @@
     motion_gate   ignore new clicks while the forearm is turning faster than this (deg/s, from
                   the band's gyro): arm movement is the main source of false clicks.
 
-`StrengthTracker` is a 1-D Kalman filter on squeeze peaks: rest = 0, the trained squeeze = 1.
+`StrengthTracker` is a 1-D Kalman filter (docs/REFERENCES.md [13]) on squeeze peaks: rest = 0, the trained squeeze = 1.
 """
 
 from __future__ import annotations

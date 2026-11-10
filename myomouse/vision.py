@@ -23,7 +23,7 @@ import numpy as np
 from . import config as C
 from .record import FIST, IGNORE, REST
 
-MODEL_FILE = Path(__file__).resolve().parent / "assets" / "hand_landmarker.task"
+MODEL_FILE = Path(__file__).resolve().parents[1] / "assets" / "hand_landmarker.task"   # shared with gesture_mapper
 
 WRIST, MCP, TIP = 0, (5, 9, 13, 17), (8, 12, 16, 20)
 HAND_LINES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8), (5, 9), (9, 10),
